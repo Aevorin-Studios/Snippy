@@ -1,0 +1,33 @@
+# Nested version repo
+version/
+
+# Build artifacts & directories
+build/
+bin/
+obj/
+out/
+x64/
+x86/
+ARM64/
+
+# MSVC compiler outputs
+*.obj
+*.res
+*.exe
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.lib
+
+# IDE & Editor files
+.vs/
+.vscode/
+*.user
+*.suo
+*.VC.db
+*.opendb
+
+# Logs & temp files
+*.log
+*.tmp
