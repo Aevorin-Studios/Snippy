@@ -15,6 +15,7 @@ struct AppSettings {
     uint32_t vk = 'S';
 
     std::wstring theme = L"System";
+    bool enableVoiceActivation = true;
     bool enableDebugLogger = false;
     bool runAtStartup = false;
 

@@ -90,6 +90,7 @@ std::string SerializeSettingsJson(const AppSettings& s) {
     ss << "  \"WinModifier\": " << (s.winModifier ? "true" : "false") << ",\n";
     ss << "  \"KeyName\": \"" << narrowKey << "\",\n";
     ss << "  \"Theme\": \"" << narrowTheme << "\",\n";
+    ss << "  \"EnableVoiceActivation\": " << (s.enableVoiceActivation ? "true" : "false") << ",\n";
     ss << "  \"EnableDebugLogger\": " << (s.enableDebugLogger ? "true" : "false") << ",\n";
     ss << "  \"AccentColor\": \"" << narrowAccent << "\",\n";
     ss << "  \"DimmingOpacity\": " << s.dimmingOpacity << ",\n";
@@ -116,6 +117,7 @@ bool DeserializeSettingsJson(const std::string& json, AppSettings& out) {
     ExtractJsonString(json, "\"KeyName\"", out.keyName);
 
     ExtractJsonString(json, "\"Theme\"", out.theme);
+    ExtractJsonBool(json, "\"EnableVoiceActivation\"", out.enableVoiceActivation);
     ExtractJsonBool(json, "\"EnableDebugLogger\"", out.enableDebugLogger);
 
     ExtractJsonString(json, "\"AccentColor\"", out.accentColor);

@@ -32,6 +32,7 @@ enum ControlId {
     ID_HOTKEY_RECORD_BOX,
     ID_HOTKEY_RECORD_BTN,
     ID_HOTKEY_RESET,
+    ID_VOICE_ACTIVATION_CARD,
     ID_DEBUG_LOGGER_CARD,
     ID_SLIDER_DIMMING,
     ID_SLIDER_BORDER,
@@ -405,7 +406,7 @@ void SettingsWindow::Render() noexcept {
         m_renderTarget->DrawText(L"\uE70D", 1, g_dwrite.IconFontChevron(), chevR, m_textSecondaryBrush.Get());
     };
 
-    m_maxScrollY = 146.0f;
+    m_maxScrollY = 224.0f;
 
     // Viewport Clipping: Y: 46.0f to 506.0f
     m_renderTarget->PushAxisAlignedClip(
@@ -488,57 +489,63 @@ void SettingsWindow::Render() noexcept {
     D2D1_RECT_F resetTextR = D2D1::RectF(166.0f, 242.0f, 312.0f, 260.0f);
     m_renderTarget->DrawText(resetText, static_cast<UINT32>(wcslen(resetText)), m_descFormat.Get(), resetTextR, resetHkBrush);
 
-    // ── Card 3: Debug Logger Console ──
-    D2D1_RECT_F card3 = D2D1::RectF(16.0f, 278.0f, 324.0f, 346.0f);
+    // ── Card 3: Voice Activation ──
+    D2D1_RECT_F cardVoice = D2D1::RectF(16.0f, 278.0f, 324.0f, 346.0f);
+    drawCard(cardVoice, L"\uE720", L"Voice Activation", L"Say \"Snippy snip it\" to capture screen hands-free.");
+    D2D1_RECT_F cbVoice = D2D1::RectF(284.0f, 301.0f, 302.0f, 319.0f);
+    drawCheckbox(cbVoice, m_stagedSettings.enableVoiceActivation);
+
+    // ── Card 4: Debug Logger Console ──
+    D2D1_RECT_F card3 = D2D1::RectF(16.0f, 356.0f, 324.0f, 424.0f);
     drawCard(card3, L"\uEBE8", L"Debug Logger Console", L"Open a live debug console window for troubleshooting and error tracing.");
-    D2D1_RECT_F cb3 = D2D1::RectF(284.0f, 301.0f, 302.0f, 319.0f);
+    D2D1_RECT_F cb3 = D2D1::RectF(284.0f, 379.0f, 302.0f, 397.0f);
     drawCheckbox(cb3, m_stagedSettings.enableDebugLogger);
 
-    // ── Card 4: Customize Overlay ──
-    D2D1_RECT_F card4 = D2D1::RectF(16.0f, 356.0f, 324.0f, 594.0f);
+    // ── Card 5: Customize Overlay ──
+    D2D1_RECT_F card4 = D2D1::RectF(16.0f, 434.0f, 324.0f, 672.0f);
     drawCard(card4, L"\uE771", L"Customize Overlay", L"Adjust the look and feel of the snipping overlay.");
 
-    D2D1_RECT_F dimLblR = D2D1::RectF(28.0f, 414.0f, 126.0f, 432.0f);
+    D2D1_RECT_F dimLblR = D2D1::RectF(28.0f, 492.0f, 126.0f, 510.0f);
     m_renderTarget->DrawText(L"Background Dim:", 15, m_itemFormat.Get(), dimLblR, m_textPrimaryBrush.Get());
 
     float trackL = 126.0f, trackR = 246.0f;
-    D2D1_RECT_F trackBg1 = D2D1::RectF(trackL, 422.0f, trackR, 426.0f);
+    D2D1_RECT_F trackBg1 = D2D1::RectF(trackL, 500.0f, trackR, 504.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackBg1, 2.0f, 2.0f), m_sliderTrackBgBrush.Get());
     float dimNorm = std::clamp(m_stagedSettings.dimmingOpacity / 100.0f, 0.0f, 1.0f);
     float dimThumbX = trackL + (trackR - trackL) * dimNorm;
-    D2D1_RECT_F trackFill1 = D2D1::RectF(trackL, 422.0f, dimThumbX, 426.0f);
+    D2D1_RECT_F trackFill1 = D2D1::RectF(trackL, 500.0f, dimThumbX, 504.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackFill1, 2.0f, 2.0f), m_accentBrush.Get());
-    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 424.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
-    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 424.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
+    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 502.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
+    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 502.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
 
     std::wstring dimStr = std::to_wstring(m_stagedSettings.dimmingOpacity) + L"%";
-    D2D1_RECT_F dimValR = D2D1::RectF(254.0f, 414.0f, 308.0f, 432.0f);
+    D2D1_RECT_F dimValR = D2D1::RectF(254.0f, 492.0f, 308.0f, 510.0f);
     m_renderTarget->DrawText(dimStr.c_str(), static_cast<UINT32>(dimStr.size()), m_itemFormat.Get(), dimValR, m_textSecondaryBrush.Get());
 
-    D2D1_RECT_F brdLblR = D2D1::RectF(28.0f, 446.0f, 126.0f, 464.0f);
+    D2D1_RECT_F brdLblR = D2D1::RectF(28.0f, 524.0f, 126.0f, 542.0f);
     m_renderTarget->DrawText(L"Selection Border:", 17, m_itemFormat.Get(), brdLblR, m_textPrimaryBrush.Get());
 
-    D2D1_RECT_F trackBg2 = D2D1::RectF(trackL, 454.0f, trackR, 458.0f);
+    D2D1_RECT_F trackBg2 = D2D1::RectF(trackL, 532.0f, trackR, 536.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackBg2, 2.0f, 2.0f), m_sliderTrackBgBrush.Get());
     float brdNorm = std::clamp((m_stagedSettings.selectionBorderThickness - 1) / 5.0f, 0.0f, 1.0f);
     float brdThumbX = trackL + (trackR - trackL) * brdNorm;
-    D2D1_RECT_F trackFill2 = D2D1::RectF(trackL, 454.0f, brdThumbX, 458.0f);
+    D2D1_RECT_F trackFill2 = D2D1::RectF(trackL, 532.0f, brdThumbX, 536.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackFill2, 2.0f, 2.0f), m_accentBrush.Get());
-    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 456.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
-    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 456.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
+    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 534.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
+    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 534.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
 
     std::wstring brdStr = std::to_wstring(m_stagedSettings.selectionBorderThickness) + L"px";
-    D2D1_RECT_F brdValR = D2D1::RectF(254.0f, 446.0f, 308.0f, 464.0f);
+    D2D1_RECT_F brdValR = D2D1::RectF(254.0f, 524.0f, 308.0f, 542.0f);
     m_renderTarget->DrawText(brdStr.c_str(), static_cast<UINT32>(brdStr.size()), m_itemFormat.Get(), brdValR, m_textSecondaryBrush.Get());
 
-    D2D1_RECT_F posLblR = D2D1::RectF(28.0f, 478.0f, 122.0f, 496.0f);
+    D2D1_RECT_F posLblR = D2D1::RectF(28.0f, 556.0f, 122.0f, 574.0f);
     m_renderTarget->DrawText(L"Toolbar Position:", 17, m_itemFormat.Get(), posLblR, m_textPrimaryBrush.Get());
 
     const WCHAR* posText = (m_stagedSettings.toolbarPosition == L"Bottom") ? L"Bottom Center" : L"Top Center";
-    D2D1_RECT_F comboPos = D2D1::RectF(124.0f, 472.0f, 308.0f, 500.0f);
+    D2D1_RECT_F comboPos = D2D1::RectF(124.0f, 550.0f, 308.0f, 578.0f);
     drawComboBox(comboPos, posText, m_openDropdown == DROPDOWN_TOOLBAR_POS, m_hoverId == ID_TOOLBAR_POS_COMBO);
 
-    D2D1_RECT_F toolsHdrR = D2D1::RectF(28.0f, 512.0f, 308.0f, 530.0f);
+    D2D1_RECT_F toolsHdrR = D2D1::RectF(28.0f, 590.0f, 308.0f, 608.0f);
     m_renderTarget->DrawText(L"Visible Annotation Tools:", 25, m_itemFormat.Get(), toolsHdrR, m_textPrimaryBrush.Get());
 
     auto isToolVisible = [&](const WCHAR* name) {
@@ -570,11 +577,11 @@ void SettingsWindow::Render() noexcept {
                                  hover ? m_textPrimaryBrush.Get() : m_textSecondaryBrush.Get());
     };
 
-    drawToolCheck(ID_TOOL_DRAW,    D2D1::RectF(28.0f,  536.0f, 124.0f, 554.0f), L"Draw Tools", isToolVisible(L"Pen") && isToolVisible(L"Draw"));
-    drawToolCheck(ID_TOOL_SHAPES,  D2D1::RectF(128.0f, 536.0f, 216.0f, 554.0f), L"Shapes",     isToolVisible(L"Shapes"));
-    drawToolCheck(ID_TOOL_BLUR,    D2D1::RectF(220.0f, 536.0f, 308.0f, 554.0f), L"Blur",       isToolVisible(L"Blur"));
-    drawToolCheck(ID_TOOL_TEXT,    D2D1::RectF(28.0f,  562.0f, 124.0f, 580.0f), L"Text",       isToolVisible(L"Text"));
-    drawToolCheck(ID_TOOL_COUNTER, D2D1::RectF(128.0f, 562.0f, 216.0f, 580.0f), L"Counter",    isToolVisible(L"Counter"));
+    drawToolCheck(ID_TOOL_DRAW,    D2D1::RectF(28.0f,  614.0f, 124.0f, 632.0f), L"Draw Tools", isToolVisible(L"Pen") && isToolVisible(L"Draw"));
+    drawToolCheck(ID_TOOL_SHAPES,  D2D1::RectF(128.0f, 614.0f, 216.0f, 632.0f), L"Shapes",     isToolVisible(L"Shapes"));
+    drawToolCheck(ID_TOOL_BLUR,    D2D1::RectF(220.0f, 614.0f, 308.0f, 632.0f), L"Blur",       isToolVisible(L"Blur"));
+    drawToolCheck(ID_TOOL_TEXT,    D2D1::RectF(28.0f,  640.0f, 124.0f, 658.0f), L"Text",       isToolVisible(L"Text"));
+    drawToolCheck(ID_TOOL_COUNTER, D2D1::RectF(128.0f, 640.0f, 216.0f, 658.0f), L"Counter",    isToolVisible(L"Counter"));
 
     m_renderTarget->SetTransform(curTransform);
     m_renderTarget->PopAxisAlignedClip();
@@ -728,18 +735,19 @@ static int HitTest(float x, float y, float scrollY) {
         if (x >= 28.0f && x <= 312.0f && cy >= 186.0f && cy <= 236.0f) return ID_HOTKEY_RECORD_BOX;
         if (x >= 146.0f && x <= 312.0f && cy >= 240.0f && cy <= 262.0f) return ID_HOTKEY_RESET;
 
-        if (x >= 16.0f && x <= 324.0f && cy >= 278.0f && cy <= 346.0f) return ID_DEBUG_LOGGER_CARD;
+        if (x >= 16.0f && x <= 324.0f && cy >= 278.0f && cy <= 346.0f) return ID_VOICE_ACTIVATION_CARD;
+        if (x >= 16.0f && x <= 324.0f && cy >= 356.0f && cy <= 424.0f) return ID_DEBUG_LOGGER_CARD;
 
-        if (x >= 120.0f && x <= 256.0f && cy >= 408.0f && cy <= 438.0f) return ID_SLIDER_DIMMING;
-        if (x >= 120.0f && x <= 256.0f && cy >= 440.0f && cy <= 470.0f) return ID_SLIDER_BORDER;
-        if (x >= 124.0f && x <= 308.0f && cy >= 472.0f && cy <= 500.0f) return ID_TOOLBAR_POS_COMBO;
+        if (x >= 120.0f && x <= 256.0f && cy >= 486.0f && cy <= 516.0f) return ID_SLIDER_DIMMING;
+        if (x >= 120.0f && x <= 256.0f && cy >= 518.0f && cy <= 548.0f) return ID_SLIDER_BORDER;
+        if (x >= 124.0f && x <= 308.0f && cy >= 550.0f && cy <= 578.0f) return ID_TOOLBAR_POS_COMBO;
 
-        if (cy >= 530.0f && cy <= 556.0f) {
+        if (cy >= 608.0f && cy <= 634.0f) {
             if (x >= 28.0f && x < 126.0f)  return ID_TOOL_DRAW;
             if (x >= 126.0f && x < 218.0f) return ID_TOOL_SHAPES;
             if (x >= 218.0f && x <= 312.0f) return ID_TOOL_BLUR;
         }
-        if (cy >= 558.0f && cy <= 584.0f) {
+        if (cy >= 636.0f && cy <= 662.0f) {
             if (x >= 28.0f && x < 126.0f)  return ID_TOOL_TEXT;
             if (x >= 126.0f && x < 218.0f) return ID_TOOL_COUNTER;
         }
@@ -845,6 +853,10 @@ void SettingsWindow::OnLButtonDown(POINT pt) noexcept {
         m_stagedSettings.keyName       = L"S";
         m_statusError.clear();
         InvalidateRect(m_hwnd, nullptr, FALSE);
+        break;
+
+    case ID_VOICE_ACTIVATION_CARD:
+        m_stagedSettings.enableVoiceActivation = !m_stagedSettings.enableVoiceActivation;
         break;
 
     case ID_DEBUG_LOGGER_CARD:

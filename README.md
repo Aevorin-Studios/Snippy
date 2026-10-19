@@ -13,12 +13,14 @@ Snippy is a native Windows screenshot utility written in C++20 using the Win32 A
 - **Local OCR**: Extracts text from captured regions using the on-device WinRT OCR engine (`Windows.Media.Ocr.OcrEngine`). Includes character bounding-box selection, line grouping, and full-text copy without network requests.
 - **Pixel Operations**: In-place region blurring (Gaussian/mosaic) and color inversion on the captured bitmap.
 - **Clipboard Output**: Immediately writes raw `CF_DIB` (Device-Independent Bitmap) on the main thread for zero-latency pasting, followed by background asynchronous encoding for registered `CF_PNG` targets.
-- **Settings & Hotkeys**: Direct2D hardware-accelerated settings window to configure global hotkeys, toolbar positioning, background dimming opacity, and active annotation tools.
+- **Voice Activation**: Hands-free capture triggered by saying *"Snippy snip it"* into your microphone. Runs natively via on-device Windows speech recognition.
+- **Settings & Hotkeys**: Direct2D hardware-accelerated settings window to configure global hotkeys, toolbar positioning, background dimming opacity, voice activation toggle, and active annotation tools.
 
-## Keyboard Shortcuts
+## Keyboard Shortcuts & Voice Commands
 
-| Shortcut | Context | Action |
+| Shortcut / Phrase | Context | Action |
 | :--- | :--- | :--- |
+| `"Snippy snip it"` | Voice | Trigger screen capture overlay hands-free |
 | `Alt + S` | Global | Trigger screen capture overlay (configurable) |
 | `PrintScreen` | Global | Trigger screen capture overlay |
 | `Enter` | Selection Active | Confirm current selection and copy to clipboard |

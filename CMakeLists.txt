@@ -37,6 +37,7 @@ if(WIN32)
         src/windows/settings/settings_manager.cpp
         src/windows/settings/settings_window.cpp
         src/windows/theme/theme_manager.cpp
+        src/windows/voice/voice_activation.cpp
         src/windows/utils/logger.cpp
         src/windows/update/update_checker.cpp
         src/windows/resources/app.rc
