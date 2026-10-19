@@ -206,67 +206,6 @@ UINT SettingsManager::GetWin32Modifiers(bool alt, bool ctrl, bool shift, bool wi
     return mod;
 }
 
-// ── JSON Helpers ──────────────────────────────────────────────────────────────
-
-static void ExtractJsonBool(const std::string& text, const char* key, bool& outVal) {
-    size_t pos = text.find(key);
-    if (pos == std::string::npos) return;
-    pos = text.find(':', pos);
-    if (pos == std::string::npos) return;
-    pos++;
-    while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\r' || text[pos] == '\n')) pos++;
-    if (text.compare(pos, 4, "true") == 0) outVal = true;
-    else if (text.compare(pos, 5, "false") == 0) outVal = false;
-}
-
-static void ExtractJsonInt(const std::string& text, const char* key, int& outVal) {
-    size_t pos = text.find(key);
-    if (pos == std::string::npos) return;
-    pos = text.find(':', pos);
-    if (pos == std::string::npos) return;
-    pos++;
-    while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\r' || text[pos] == '\n')) pos++;
-    if (pos < text.size() && (isdigit(text[pos]) || text[pos] == '-')) {
-        outVal = std::atoi(text.c_str() + pos);
-    }
-}
-
-static void ExtractJsonString(const std::string& text, const char* key, std::wstring& outVal) {
-    size_t pos = text.find(key);
-    if (pos == std::string::npos) return;
-    pos = text.find(':', pos);
-    if (pos == std::string::npos) return;
-    pos = text.find('\"', pos);
-    if (pos == std::string::npos) return;
-    size_t end = text.find('\"', pos + 1);
-    if (end == std::string::npos) return;
-    std::string s = text.substr(pos + 1, end - pos - 1);
-    outVal = std::wstring(s.begin(), s.end());
-}
-
-static void ExtractJsonStringArray(const std::string& text, const char* key, std::vector<std::wstring>& outArray) {
-    size_t pos = text.find(key);
-    if (pos == std::string::npos) return;
-    pos = text.find('[', pos);
-    if (pos == std::string::npos) return;
-    size_t end = text.find(']', pos);
-    if (end == std::string::npos) return;
-    outArray.clear();
-
-    size_t cur = pos + 1;
-    while (cur < end) {
-        size_t q1 = text.find('\"', cur);
-        if (q1 == std::string::npos || q1 >= end) break;
-        size_t q2 = text.find('\"', q1 + 1);
-        if (q2 == std::string::npos || q2 >= end) break;
-        std::string item = text.substr(q1 + 1, q2 - q1 - 1);
-        if (!item.empty()) {
-            outArray.push_back(std::wstring(item.begin(), item.end()));
-        }
-        cur = q2 + 1;
-    }
-}
-
 // ── Load & Save ───────────────────────────────────────────────────────────────
 
 void SettingsManager::ResetToDefaults() noexcept {
@@ -287,25 +226,8 @@ void SettingsManager::LoadSettings() noexcept {
             std::string content(size, '\0');
             DWORD read = 0;
             if (ReadFile(hFile, content.data(), size, &read, nullptr) && read > 0) {
-                ExtractJsonBool(content, "\"AltModifier\"", s_settings.altModifier);
-                ExtractJsonBool(content, "\"CtrlModifier\"", s_settings.ctrlModifier);
-                ExtractJsonBool(content, "\"ShiftModifier\"", s_settings.shiftModifier);
-                ExtractJsonBool(content, "\"WinModifier\"", s_settings.winModifier);
-                ExtractJsonString(content, "\"KeyName\"", s_settings.keyName);
+                DeserializeSettingsJson(content, s_settings);
                 s_settings.vk = VkFromName(s_settings.keyName);
-
-                ExtractJsonString(content, "\"Theme\"", s_settings.theme);
-                ExtractJsonBool(content, "\"EnableDebugLogger\"", s_settings.enableDebugLogger);
-
-                ExtractJsonString(content, "\"AccentColor\"", s_settings.accentColor);
-                ExtractJsonInt(content, "\"DimmingOpacity\"", s_settings.dimmingOpacity);
-                s_settings.dimmingOpacity = std::max(0, std::min(s_settings.dimmingOpacity, 100));
-
-                ExtractJsonInt(content, "\"SelectionBorderThickness\"", s_settings.selectionBorderThickness);
-                s_settings.selectionBorderThickness = std::max(1, std::min(s_settings.selectionBorderThickness, 6));
-
-                ExtractJsonString(content, "\"ToolbarPosition\"", s_settings.toolbarPosition);
-                ExtractJsonStringArray(content, "\"HiddenTools\"", s_settings.hiddenTools);
             }
         }
         CloseHandle(hFile);
@@ -320,17 +242,22 @@ void SettingsManager::LoadSettings() noexcept {
             s_settings.toolbarPosition = val;
             s_settings.dimmingOpacity = GetPrivateProfileIntW(kIniSection, L"DimmingOpacity", 50, iniPath.c_str());
             s_settings.selectionBorderThickness = GetPrivateProfileIntW(kIniSection, L"SelectionBorderThickness", 2, iniPath.c_str());
+            WCHAR hTools[512]{};
+            GetPrivateProfileStringW(kIniSection, L"HiddenTools", L"", hTools, 512, iniPath.c_str());
+            if (hTools[0] != L'\0') {
+                s_settings.hiddenTools.clear();
+                std::wstring valStr = hTools;
+                size_t start = 0;
+                while (start < valStr.size()) {
+                    size_t comma = valStr.find(L',', start);
+                    std::wstring item = valStr.substr(start, comma == std::wstring::npos ? comma : comma - start);
+                    if (!item.empty()) s_settings.hiddenTools.push_back(item);
+                    if (comma == std::wstring::npos) break;
+                    start = comma + 1;
+                }
+            }
         }
     }
-}
-
-static std::string WideToUtf8(const std::wstring& w) {
-    if (w.empty()) return {};
-    int size = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-    if (size <= 0) return {};
-    std::string s(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), s.data(), size, nullptr, nullptr);
-    return s;
 }
 
 void SettingsManager::SaveSettings() noexcept {
@@ -338,33 +265,7 @@ void SettingsManager::SaveSettings() noexcept {
     HANDLE hFile = CreateFileW(jsonPath.c_str(), GENERIC_WRITE, 0,
                                nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile != INVALID_HANDLE_VALUE) {
-        std::string narrowKey   = WideToUtf8(s_settings.keyName);
-        std::string narrowTheme = WideToUtf8(s_settings.theme);
-        std::string narrowPos   = WideToUtf8(s_settings.toolbarPosition);
-        std::string narrowAccent= WideToUtf8(s_settings.accentColor);
-
-        std::ostringstream ss;
-        ss << "{\n";
-        ss << "  \"AltModifier\": " << (s_settings.altModifier ? "true" : "false") << ",\n";
-        ss << "  \"CtrlModifier\": " << (s_settings.ctrlModifier ? "true" : "false") << ",\n";
-        ss << "  \"ShiftModifier\": " << (s_settings.shiftModifier ? "true" : "false") << ",\n";
-        ss << "  \"WinModifier\": " << (s_settings.winModifier ? "true" : "false") << ",\n";
-        ss << "  \"KeyName\": \"" << narrowKey << "\",\n";
-        ss << "  \"Theme\": \"" << narrowTheme << "\",\n";
-        ss << "  \"EnableDebugLogger\": " << (s_settings.enableDebugLogger ? "true" : "false") << ",\n";
-        ss << "  \"AccentColor\": \"" << narrowAccent << "\",\n";
-        ss << "  \"DimmingOpacity\": " << s_settings.dimmingOpacity << ",\n";
-        ss << "  \"ToolbarPosition\": \"" << narrowPos << "\",\n";
-        ss << "  \"SelectionBorderThickness\": " << s_settings.selectionBorderThickness << ",\n";
-        ss << "  \"HiddenTools\": [";
-        for (size_t i = 0; i < s_settings.hiddenTools.size(); ++i) {
-            std::string t = WideToUtf8(s_settings.hiddenTools[i]);
-            ss << "\"" << t << "\"" << (i + 1 < s_settings.hiddenTools.size() ? ", " : "");
-        }
-        ss << "]\n";
-        ss << "}\n";
-
-        std::string json = ss.str();
+        std::string json = SerializeSettingsJson(s_settings);
         DWORD written = 0;
         WriteFile(hFile, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
         CloseHandle(hFile);

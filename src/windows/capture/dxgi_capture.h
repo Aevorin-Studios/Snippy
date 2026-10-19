@@ -18,7 +18,7 @@
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 #include <vector>
-#include "frame_buffer.h"
+#include "core/frame_buffer.h"
 
 using Microsoft::WRL::ComPtr;
 

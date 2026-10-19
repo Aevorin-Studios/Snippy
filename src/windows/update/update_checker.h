@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/version.h"
 #include <windows.h>
 #include <string>
 
@@ -20,9 +21,9 @@ struct VersionInfo {
 
 class UpdateChecker {
 public:
-    static constexpr const WCHAR* kCurrentVersion   = L"1.0.0";
-    static constexpr int          kCurrentBuild     = 5;
-    static constexpr const WCHAR* kDefaultUpdateUrl = L"https://raw.githubusercontent.com/Aevorin-Studios/Snippy-for-Windows/main/version.json";
+    static constexpr const WCHAR* kCurrentVersion   = snippy::kCurrentVersion;
+    static constexpr int          kCurrentBuild     = snippy::kCurrentBuild;
+    static constexpr const WCHAR* kDefaultUpdateUrl = snippy::kDefaultUpdateUrl;
 
     static void Initialize(HINSTANCE hInstance) noexcept;
 

@@ -1,24 +1,14 @@
 #pragma once
 
-//
-// frame_buffer.h — Zero-copy view into a captured desktop frame.
-//
-// A FrameBuffer never owns its memory. It is a non-owning view (like std::span)
-// over a pre-allocated staging texture that the DxgiCapture module owns.
-//
-// SubRegion() performs only pointer arithmetic — no copy, no allocation.
-//
-
-#include <windows.h>
+#include "types.h"
 #include <cstdint>
 #include <cassert>
-#include <span>
 #include <algorithm>
 
 namespace snippy {
 
 struct FrameBuffer {
-    const uint8_t* data   = nullptr;  // BGRA row-major pixels
+    const uint8_t* data   = nullptr;  // BGRA/RGBA row-major pixels
     uint32_t       stride = 0;        // bytes per row (may include padding)
     uint32_t       width  = 0;        // pixels
     uint32_t       height = 0;        // pixels
@@ -27,13 +17,11 @@ struct FrameBuffer {
         return data != nullptr && width > 0 && height > 0 && stride >= width * 4;
     }
 
-    // Returns a non-owning view over a sub-rectangle of this buffer.
-    // The returned FrameBuffer shares the same underlying memory — no copy.
-    [[nodiscard]] FrameBuffer SubRegion(RECT r) const noexcept {
-        r.left   = std::max(r.left,   0L);
-        r.top    = std::max(r.top,    0L);
-        r.right  = std::min(r.right,  static_cast<LONG>(width));
-        r.bottom = std::min(r.bottom, static_cast<LONG>(height));
+    [[nodiscard]] FrameBuffer SubRegion(Rect r) const noexcept {
+        r.left   = std::max(r.left,   0);
+        r.top    = std::max(r.top,    0);
+        r.right  = std::min(r.right,  static_cast<int32_t>(width));
+        r.bottom = std::min(r.bottom, static_cast<int32_t>(height));
 
         if (r.right <= r.left || r.bottom <= r.top) {
             return FrameBuffer{};

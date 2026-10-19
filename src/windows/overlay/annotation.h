@@ -3,6 +3,7 @@
 // annotation.h — Shared annotation data types for the editor.
 //
 
+#include "core/types.h"
 #include <windows.h>
 #include <d2d1_3.h>
 #include <d2d1_3helper.h>
@@ -20,8 +21,6 @@ enum class AnnotationType { Rect, Ellipse, Arrow, Text, Blur, FreeDraw, Counter 
 enum class ToolMode       { Select, Rect, FilledRect, Ellipse, Line, Arrow, Text, Blur, FreeDraw, Highlighter, Eraser, Counter };
 enum class CaptureMode    { Region, Fullscreen, Freeform, ColorPicker, TextExtract };
 enum class BlurStyle      { Gaussian, Mosaic, Invert };
-
-struct ColorF { float r, g, b, a; };
 
 inline D2D1_COLOR_F ToD2D(ColorF c) { return D2D1::ColorF(c.r, c.g, c.b, c.a); }
 

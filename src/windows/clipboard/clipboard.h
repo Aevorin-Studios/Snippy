@@ -8,7 +8,7 @@
 //
 
 #include <windows.h>
-#include "../capture/frame_buffer.h"
+#include "core/frame_buffer.h"
 
 namespace snippy {
 

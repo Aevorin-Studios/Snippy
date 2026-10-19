@@ -405,7 +405,7 @@ void SettingsWindow::Render() noexcept {
         m_renderTarget->DrawText(L"\uE70D", 1, g_dwrite.IconFontChevron(), chevR, m_textSecondaryBrush.Get());
     };
 
-    m_maxScrollY = 136.0f;
+    m_maxScrollY = 146.0f;
 
     // Viewport Clipping: Y: 46.0f to 506.0f
     m_renderTarget->PushAxisAlignedClip(
@@ -495,7 +495,7 @@ void SettingsWindow::Render() noexcept {
     drawCheckbox(cb3, m_stagedSettings.enableDebugLogger);
 
     // ── Card 4: Customize Overlay ──
-    D2D1_RECT_F card4 = D2D1::RectF(16.0f, 356.0f, 324.0f, 584.0f);
+    D2D1_RECT_F card4 = D2D1::RectF(16.0f, 356.0f, 324.0f, 594.0f);
     drawCard(card4, L"\uE771", L"Customize Overlay", L"Adjust the look and feel of the snipping overlay.");
 
     D2D1_RECT_F dimLblR = D2D1::RectF(28.0f, 414.0f, 126.0f, 432.0f);
@@ -544,22 +544,37 @@ void SettingsWindow::Render() noexcept {
     auto isToolVisible = [&](const WCHAR* name) {
         for (const auto& h : m_stagedSettings.hiddenTools) {
             if (_wcsicmp(h.c_str(), name) == 0) return false;
+            if (_wcsicmp(name, L"Pen") == 0 || _wcsicmp(name, L"Draw") == 0) {
+                if (_wcsicmp(h.c_str(), L"Draw Tools") == 0 || _wcsicmp(h.c_str(), L"DrawTools") == 0) {
+                    return false;
+                }
+            }
         }
         return true;
     };
 
-    auto drawToolCheck = [&](D2D1_RECT_F r, const WCHAR* label, bool checked) {
+    auto drawToolCheck = [&](int id, D2D1_RECT_F r, const WCHAR* label, bool checked) {
+        bool hover = (m_hoverId == id);
         D2D1_RECT_F box = D2D1::RectF(r.left, r.top + 2.0f, r.left + 15.0f, r.top + 17.0f);
-        drawCheckbox(box, checked);
+        if (checked) {
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(box, 3.5f, 3.5f), hover ? m_accentHoverBrush.Get() : m_accentBrush.Get());
+            D2D1_RECT_F checkR = D2D1::RectF(box.left, box.top - 1.0f, box.right, box.bottom + 1.0f);
+            m_renderTarget->DrawText(L"\uE73E", 1, g_dwrite.IconFontChevron(), checkR, m_sliderThumbBrush.Get());
+        } else {
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(box, 3.5f, 3.5f), m_inputBgBrush.Get());
+            ID2D1SolidColorBrush* border = hover ? m_accentHoverBrush.Get() : m_inputBorderBrush.Get();
+            m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(box, 3.5f, 3.5f), border, 1.0f);
+        }
         D2D1_RECT_F textR = D2D1::RectF(r.left + 20.0f, r.top, r.right, r.bottom);
-        m_renderTarget->DrawText(label, static_cast<UINT32>(wcslen(label)), m_itemFormat.Get(), textR, m_textSecondaryBrush.Get());
+        m_renderTarget->DrawText(label, static_cast<UINT32>(wcslen(label)), m_itemFormat.Get(), textR,
+                                 hover ? m_textPrimaryBrush.Get() : m_textSecondaryBrush.Get());
     };
 
-    drawToolCheck(D2D1::RectF(28.0f, 536.0f, 100.0f, 554.0f), L"Draw Tools", isToolVisible(L"Draw") && isToolVisible(L"Pen"));
-    drawToolCheck(D2D1::RectF(106.0f, 536.0f, 164.0f, 554.0f), L"Shapes", isToolVisible(L"Shapes"));
-    drawToolCheck(D2D1::RectF(168.0f, 536.0f, 214.0f, 554.0f), L"Blur", isToolVisible(L"Blur"));
-    drawToolCheck(D2D1::RectF(216.0f, 536.0f, 264.0f, 554.0f), L"Text", isToolVisible(L"Text"));
-    drawToolCheck(D2D1::RectF(28.0f, 560.0f, 100.0f, 578.0f), L"Counter", isToolVisible(L"Counter"));
+    drawToolCheck(ID_TOOL_DRAW,    D2D1::RectF(28.0f,  536.0f, 124.0f, 554.0f), L"Draw Tools", isToolVisible(L"Pen") && isToolVisible(L"Draw"));
+    drawToolCheck(ID_TOOL_SHAPES,  D2D1::RectF(128.0f, 536.0f, 216.0f, 554.0f), L"Shapes",     isToolVisible(L"Shapes"));
+    drawToolCheck(ID_TOOL_BLUR,    D2D1::RectF(220.0f, 536.0f, 308.0f, 554.0f), L"Blur",       isToolVisible(L"Blur"));
+    drawToolCheck(ID_TOOL_TEXT,    D2D1::RectF(28.0f,  562.0f, 124.0f, 580.0f), L"Text",       isToolVisible(L"Text"));
+    drawToolCheck(ID_TOOL_COUNTER, D2D1::RectF(128.0f, 562.0f, 216.0f, 580.0f), L"Counter",    isToolVisible(L"Counter"));
 
     m_renderTarget->SetTransform(curTransform);
     m_renderTarget->PopAxisAlignedClip();
@@ -719,14 +734,14 @@ static int HitTest(float x, float y, float scrollY) {
         if (x >= 120.0f && x <= 256.0f && cy >= 440.0f && cy <= 470.0f) return ID_SLIDER_BORDER;
         if (x >= 124.0f && x <= 308.0f && cy >= 472.0f && cy <= 500.0f) return ID_TOOLBAR_POS_COMBO;
 
-        if (cy >= 532.0f && cy <= 556.0f) {
-            if (x >= 28.0f && x <= 100.0f)  return ID_TOOL_DRAW;
-            if (x >= 106.0f && x <= 164.0f) return ID_TOOL_SHAPES;
-            if (x >= 168.0f && x <= 214.0f) return ID_TOOL_BLUR;
-            if (x >= 216.0f && x <= 264.0f) return ID_TOOL_TEXT;
+        if (cy >= 530.0f && cy <= 556.0f) {
+            if (x >= 28.0f && x < 126.0f)  return ID_TOOL_DRAW;
+            if (x >= 126.0f && x < 218.0f) return ID_TOOL_SHAPES;
+            if (x >= 218.0f && x <= 312.0f) return ID_TOOL_BLUR;
         }
-        if (cy >= 556.0f && cy <= 580.0f) {
-            if (x >= 28.0f && x <= 100.0f)  return ID_TOOL_COUNTER;
+        if (cy >= 558.0f && cy <= 584.0f) {
+            if (x >= 28.0f && x < 126.0f)  return ID_TOOL_TEXT;
+            if (x >= 126.0f && x < 218.0f) return ID_TOOL_COUNTER;
         }
     }
 
@@ -837,14 +852,28 @@ void SettingsWindow::OnLButtonDown(POINT pt) noexcept {
         break;
 
     case ID_TOOL_DRAW: {
-        auto toggle = [&](const WCHAR* name) {
-            auto it = std::find_if(m_stagedSettings.hiddenTools.begin(), m_stagedSettings.hiddenTools.end(),
-                                   [&](const std::wstring& s) { return _wcsicmp(s.c_str(), name) == 0; });
-            if (it != m_stagedSettings.hiddenTools.end()) m_stagedSettings.hiddenTools.erase(it);
-            else m_stagedSettings.hiddenTools.push_back(name);
-        };
-        toggle(L"Draw");
-        toggle(L"Pen");
+        bool currentlyHidden = false;
+        for (const auto& h : m_stagedSettings.hiddenTools) {
+            if (_wcsicmp(h.c_str(), L"Pen") == 0 || _wcsicmp(h.c_str(), L"Draw") == 0 ||
+                _wcsicmp(h.c_str(), L"Draw Tools") == 0 || _wcsicmp(h.c_str(), L"DrawTools") == 0) {
+                currentlyHidden = true;
+                break;
+            }
+        }
+        if (currentlyHidden) {
+            m_stagedSettings.hiddenTools.erase(
+                std::remove_if(m_stagedSettings.hiddenTools.begin(), m_stagedSettings.hiddenTools.end(),
+                               [](const std::wstring& s) {
+                                   return _wcsicmp(s.c_str(), L"Pen") == 0 ||
+                                          _wcsicmp(s.c_str(), L"Draw") == 0 ||
+                                          _wcsicmp(s.c_str(), L"Draw Tools") == 0 ||
+                                          _wcsicmp(s.c_str(), L"DrawTools") == 0;
+                               }),
+                m_stagedSettings.hiddenTools.end());
+        } else {
+            m_stagedSettings.hiddenTools.push_back(L"Pen");
+            m_stagedSettings.hiddenTools.push_back(L"Draw");
+        }
         break;
     }
     case ID_TOOL_SHAPES:

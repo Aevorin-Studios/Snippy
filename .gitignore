@@ -31,3 +31,6 @@ ARM64/
 # Logs & temp files
 *.log
 *.tmp
+
+# Dev note
+dev.md

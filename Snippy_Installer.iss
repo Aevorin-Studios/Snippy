@@ -21,7 +21,7 @@ LicenseFile=LICENSE
 DisableProgramGroupPage=yes
 OutputBaseFilename=Snippy_Setup
 OutputDir=InstallerOutput
-SetupIconFile=src\resources\icons\snippy.ico
+SetupIconFile=src\windows\resources\icons\snippy.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -38,9 +38,9 @@ Name: "autostart"; Description: "Automatically launch Snippy when Windows boots 
 
 [Files]
 Source: "build\Snippy.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "src\resources\icons\app.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "src\resources\icons\app.png"; DestDir: "{app}"; Flags: ignoreversion
-Source: "src\resources\icons\favicon.svg"; DestDir: "{app}"; Flags: ignoreversion
+Source: "src\windows\resources\icons\app.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "src\windows\resources\icons\app.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "src\windows\resources\icons\favicon.svg"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

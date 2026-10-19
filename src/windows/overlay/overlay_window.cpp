@@ -52,8 +52,18 @@ static std::vector<std::wstring> ParseSettingList(const std::wstring& value) {
 }
 
 static bool HasSetting(const std::vector<std::wstring>& values, const WCHAR* name) {
-    const auto normalized = TrimSetting(name);
-    return std::find(values.begin(), values.end(), normalized) != values.end();
+    if (!name || !*name) return false;
+    const std::wstring normName = TrimSetting(name);
+    for (const auto& v : values) {
+        if (_wcsicmp(v.c_str(), name) == 0) return true;
+        const std::wstring normV = TrimSetting(v);
+        if (normV == normName) return true;
+        if ((normName == L"pen" || normName == L"draw") &&
+            (normV == L"pen" || normV == L"draw" || normV == L"draw tools" || normV == L"drawtools")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool ParseHexColor(const std::wstring& value, D2D1_COLOR_F& color) {
@@ -131,6 +141,30 @@ void OverlayWindow::LoadToolbarSettings() noexcept {
 
 void OverlayWindow::ReloadSettings() noexcept {
     LoadToolbarSettings();
+
+    if (HasSetting(m_hiddenTools, L"Pen") &&
+        (m_toolMode == ToolMode::FreeDraw || m_toolMode == ToolMode::Highlighter || m_toolMode == ToolMode::Eraser)) {
+        m_toolMode = ToolMode::Select;
+    }
+    if (HasSetting(m_hiddenTools, L"Shapes") &&
+        (m_toolMode == ToolMode::Rect || m_toolMode == ToolMode::Ellipse ||
+         m_toolMode == ToolMode::Arrow || m_toolMode == ToolMode::Line || m_toolMode == ToolMode::FilledRect)) {
+        m_toolMode = ToolMode::Select;
+    }
+    if (HasSetting(m_hiddenTools, L"Blur") && m_toolMode == ToolMode::Blur) {
+        m_toolMode = ToolMode::Select;
+    }
+    if (HasSetting(m_hiddenTools, L"Text") && m_toolMode == ToolMode::Text) {
+        m_toolMode = ToolMode::Select;
+    }
+    if (HasSetting(m_hiddenTools, L"Counter") && m_toolMode == ToolMode::Counter) {
+        m_toolMode = ToolMode::Select;
+    }
+
+    if (m_hwnd && IsWindowVisible(m_hwnd)) {
+        BuildToolbar();
+        RenderFrame();
+    }
 }
 
 static float Dist2(D2D1_POINT_2F a, D2D1_POINT_2F b) {
@@ -560,7 +594,7 @@ void OverlayWindow::ApplyFullscreenSelection() noexcept {
     m_selection.anchor  = { m_monitorRect.left,  m_monitorRect.top };
     m_selection.current = { m_monitorRect.right, m_monitorRect.bottom };
     m_selection.phase   = SelectionState::Phase::Editing;
-    m_toolMode = ToolMode::FreeDraw;
+    m_toolMode = HasSetting(m_hiddenTools, L"Pen") ? ToolMode::Select : ToolMode::FreeDraw;
     m_annotations.clear();
     m_undoStack.clear();
     m_redoStack.clear();

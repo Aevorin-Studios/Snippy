@@ -1,30 +1,11 @@
 #pragma once
 
+#include "core/settings.h"
 #include <windows.h>
 #include <string>
 #include <vector>
 
 namespace snippy {
-
-struct AppSettings {
-    bool altModifier   = true;
-    bool ctrlModifier  = false;
-    bool shiftModifier = false;
-    bool winModifier   = false;
-    std::wstring keyName = L"S";
-    UINT vk = 'S';
-
-    std::wstring theme = L"System"; // "System", "Light", "Dark"
-    bool enableDebugLogger = false;
-    bool runAtStartup = false;
-
-    // Overlay customization
-    std::wstring accentColor = L""; // Empty for system accent, or "#RRGGBB"
-    int dimmingOpacity = 50;        // 0 - 100
-    int selectionBorderThickness = 2; // 1 - 6
-    std::wstring toolbarPosition = L"Top"; // "Top", "Bottom"
-    std::vector<std::wstring> hiddenTools; // e.g. "Draw", "Shapes", "Blur", "Text", "Counter"
-};
 
 class SettingsManager {
 public:

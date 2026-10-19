@@ -15,9 +15,9 @@
 #include <dcomp.h>
 #include <wrl/client.h>
 #include <functional>
-#include "../capture/frame_buffer.h"
+#include "core/frame_buffer.h"
+#include "core/selection.h"
 #include "../capture/dxgi_capture.h"
-#include "selection.h"
 #include "annotation.h"
 #include "tools/rect_tool.h"
 #include "tools/arrow_tool.h"
