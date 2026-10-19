@@ -75,6 +75,12 @@ The output installer is generated at `InstallerOutput\Snippy_Setup.exe`.
 - **Multi-Monitor Mixed DPI**: On setups where monitors have significantly different DPI scale factors (e.g., 200% alongside 100%), moving selections across monitor boundaries can produce coordinate rounding differences until mouse release.
 - **OCR Language Packs**: The text recognition feature depends on Windows built-in OCR language packs. If recognition fails to return characters, verify that the corresponding OCR language component is installed under Windows Settings -> Time & Language -> Language & Region.
 
-## License
+## License & Contributing
 
-MIT
+Snippy is released under a **Source-Available License** by [Aevorin Studios](https://github.com/Aevorin-Studios):
+
+- **Personal & Local Use**: You are free to view the source code, inspect it, and compile it locally for personal use.
+- **Contributions**: Contributions and Pull Requests back to the official upstream repository are welcome. By submitting a contribution, you grant Aevorin Studios rights to include and distribute your work as part of the official project.
+- **Redistribution Restrictions**: You may **not** distribute, publish, or host modified versions/forks of the software or its compiled binaries without prior written permission from Aevorin Studios.
+
+See the full terms in the [LICENSE](LICENSE) file.
