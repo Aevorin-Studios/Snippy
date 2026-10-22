@@ -170,7 +170,6 @@ void ExtractTextAsync(std::vector<uint8_t> bgra, uint32_t width, uint32_t height
     ExtractInlineTextAsync(std::move(bgra), width, height, [](OcrInlineResult res) {
         if (res.success && !res.fullText.empty()) {
             Clipboard::WriteText(res.fullText.c_str(), nullptr);
-            MessageBeep(MB_OK);
         } else {
             Clipboard::WriteText(L"", nullptr);
         }

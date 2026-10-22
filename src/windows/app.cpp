@@ -145,6 +145,7 @@ bool App::Initialize(HINSTANCE hInstance) noexcept {
     UpdateChecker::CheckAndNotifyIfUpdated(m_msgHwnd, hkStr);
     UpdateChecker::StartPeriodicCheck(5);
 
+    g_voiceActivation.SetKeyword(settings.voiceKeyword);
     g_voiceActivation.Initialize([this]() { OnHotkey(); });
     if (settings.enableVoiceActivation) {
         g_voiceActivation.Start();
@@ -311,6 +312,7 @@ void App::ApplySettings() noexcept {
     );
     g_tray.UpdateTooltip(hkStr);
 
+    g_voiceActivation.SetKeyword(s.voiceKeyword);
     if (s.enableVoiceActivation != g_voiceActivation.IsRunning()) {
         if (s.enableVoiceActivation) {
             g_voiceActivation.Start();

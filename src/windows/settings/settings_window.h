@@ -49,10 +49,13 @@ private:
     void OnLButtonUp(POINT pt) noexcept;
     void OnKeyDown(WPARAM vk) noexcept;
     void OnKeyUp(WPARAM vk) noexcept;
+    void OnChar(WPARAM ch) noexcept;
     void OnMouseWheel(short delta) noexcept;
 
     void StartRecording() noexcept;
     void StopRecording() noexcept;
+    void StartEditingVoiceKeyword() noexcept;
+    void StopEditingVoiceKeyword() noexcept;
     void SaveAndApply() noexcept;
     void ResetToDefaults() noexcept;
     void ApplyThemePalette(const std::wstring& themeSetting) noexcept;
@@ -95,6 +98,9 @@ private:
     AppSettings   m_stagedSettings{};
     bool          m_isRecording   = false;
     std::wstring  m_recordingText = L"Press shortcut keys...";
+    bool          m_editingVoiceKeyword = false;
+    bool          m_caretVisible        = false;
+    ULONGLONG     m_lastVoiceInputTime  = 0;
     bool          m_draggingDim   = false;
     bool          m_draggingBrd   = false;
     bool          m_saveFeedback  = false;

@@ -6,8 +6,8 @@ IDI_SNIPPY_ICON ICON "icons/snippy.ico"
 
 // Version information
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1,0,0,6
-PRODUCTVERSION  1,0,0,6
+FILEVERSION     1,0,0,7
+PRODUCTVERSION  1,0,0,7
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 FILEFLAGS       0x0L
 FILEOS          VOS_NT_WINDOWS32
@@ -20,12 +20,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Aevorin Studios"
             VALUE "FileDescription",  "Snippy - Ultra-Fast Screenshot Tool"
-            VALUE "FileVersion",      "1.0.0.6"
+            VALUE "FileVersion",      "1.0.0.7"
             VALUE "InternalName",     "Snippy"
             VALUE "LegalCopyright",   "Copyright 2026 Aevorin Studios"
             VALUE "OriginalFilename", "Snippy.exe"
             VALUE "ProductName",      "Snippy"
-            VALUE "ProductVersion",   "1.0.0.6"
+            VALUE "ProductVersion",   "1.0.0.7"
         END
     END
     BLOCK "VarFileInfo"

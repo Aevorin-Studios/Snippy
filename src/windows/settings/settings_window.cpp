@@ -24,6 +24,13 @@ SettingsWindow g_settingsWindow;
 
 static constexpr WCHAR kSettingsClassName[] = L"SnippySettingsWnd";
 static constexpr UINT_PTR kTimerSaveFeedback = 101;
+static constexpr UINT_PTR kTimerCaretBlink    = 102;
+
+static UINT GetCaretBlinkInterval() noexcept {
+    UINT u = GetCaretBlinkTime();
+    if (u == 0 || u == INFINITE) return 500;
+    return u;
+}
 
 enum ControlId {
     ID_NONE = 0,
@@ -33,6 +40,8 @@ enum ControlId {
     ID_HOTKEY_RECORD_BTN,
     ID_HOTKEY_RESET,
     ID_VOICE_ACTIVATION_CARD,
+    ID_VOICE_KEYWORD_BOX,
+    ID_VOICE_KEYWORD_RESET,
     ID_DEBUG_LOGGER_CARD,
     ID_SLIDER_DIMMING,
     ID_SLIDER_BORDER,
@@ -105,6 +114,8 @@ bool SettingsWindow::Initialize(HINSTANCE hInstance) noexcept {
 void SettingsWindow::Shutdown() noexcept {
     DiscardD2DResources();
     if (m_hwnd) {
+        KillTimer(m_hwnd, kTimerSaveFeedback);
+        KillTimer(m_hwnd, kTimerCaretBlink);
         DestroyWindow(m_hwnd);
         m_hwnd = nullptr;
     }
@@ -148,6 +159,12 @@ void SettingsWindow::Show() noexcept {
     SettingsManager::LoadSettings();
     m_stagedSettings = SettingsManager::Current();
     m_isRecording = false;
+    m_editingVoiceKeyword = false;
+    m_caretVisible = false;
+    m_lastVoiceInputTime = 0;
+    if (m_hwnd) {
+        KillTimer(m_hwnd, kTimerCaretBlink);
+    }
     m_statusError.clear();
     m_saveFeedback = false;
     m_scrollY = 0.0f;
@@ -181,6 +198,7 @@ void SettingsWindow::Show() noexcept {
 void SettingsWindow::Hide() noexcept {
     if (m_hwnd) {
         if (m_isRecording) StopRecording();
+        StopEditingVoiceKeyword();
         m_openDropdown = DROPDOWN_NONE;
         ShowWindow(m_hwnd, SW_HIDE);
     }
@@ -406,7 +424,7 @@ void SettingsWindow::Render() noexcept {
         m_renderTarget->DrawText(L"\uE70D", 1, g_dwrite.IconFontChevron(), chevR, m_textSecondaryBrush.Get());
     };
 
-    m_maxScrollY = 224.0f;
+    m_maxScrollY = 270.0f;
 
     // Viewport Clipping: Y: 46.0f to 506.0f
     m_renderTarget->PushAxisAlignedClip(
@@ -490,62 +508,91 @@ void SettingsWindow::Render() noexcept {
     m_renderTarget->DrawText(resetText, static_cast<UINT32>(wcslen(resetText)), m_descFormat.Get(), resetTextR, resetHkBrush);
 
     // ── Card 3: Voice Activation ──
-    D2D1_RECT_F cardVoice = D2D1::RectF(16.0f, 278.0f, 324.0f, 346.0f);
-    drawCard(cardVoice, L"\uE720", L"Voice Activation", L"Say \"Snippy snip it\" to capture screen hands-free.");
-    D2D1_RECT_F cbVoice = D2D1::RectF(284.0f, 301.0f, 302.0f, 319.0f);
+    D2D1_RECT_F cardVoice = D2D1::RectF(16.0f, 278.0f, 324.0f, 388.0f);
+    drawCard(cardVoice, L"\uE720", L"Voice Activation", L"Trigger screen capture hands-free with your voice.");
+    D2D1_RECT_F cbVoice = D2D1::RectF(284.0f, 288.0f, 302.0f, 306.0f);
     drawCheckbox(cbVoice, m_stagedSettings.enableVoiceActivation);
 
+    D2D1_RECT_F kwBox = D2D1::RectF(28.0f, 328.0f, 246.0f, 356.0f);
+    m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(kwBox, 5.0f, 5.0f), m_inputBgBrush.Get());
+    ID2D1SolidColorBrush* kwBorder = m_editingVoiceKeyword ? m_accentBrush.Get() :
+        (m_hoverId == ID_VOICE_KEYWORD_BOX ? m_accentHoverBrush.Get() : m_inputBorderBrush.Get());
+    m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(kwBox, 5.0f, 5.0f), kwBorder, m_editingVoiceKeyword ? 1.5f : 1.0f);
+
+    D2D1_RECT_F kwIconR = D2D1::RectF(36.0f, 334.0f, 50.0f, 350.0f);
+    m_renderTarget->DrawText(L"\uE720", 1, g_dwrite.IconFontChevron(), kwIconR, m_accentBrush.Get());
+
+    std::wstring displayKw = m_stagedSettings.voiceKeyword;
+    if (m_editingVoiceKeyword && m_caretVisible) {
+        displayKw += L"|";
+    }
+    D2D1_RECT_F kwTextR = D2D1::RectF(54.0f, 329.0f, 242.0f, 355.0f);
+    m_renderTarget->DrawText(displayKw.c_str(), static_cast<UINT32>(displayKw.size()), m_itemFormat.Get(), kwTextR, m_textPrimaryBrush.Get());
+
+    D2D1_RECT_F kwResetR = D2D1::RectF(252.0f, 328.0f, 312.0f, 356.0f);
+    bool resetHover = (m_hoverId == ID_VOICE_KEYWORD_RESET);
+    m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(kwResetR, 5.0f, 5.0f),
+                                         resetHover ? m_btnSecondaryHoverBrush.Get() : m_btnSecondaryBgBrush.Get());
+    m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(kwResetR, 5.0f, 5.0f), m_btnSecondaryBorderBrush.Get(), 1.0f);
+    m_renderTarget->DrawText(L"Default", 7, m_btnFormat.Get(), kwResetR,
+                             resetHover ? m_textPrimaryBrush.Get() : m_textSecondaryBrush.Get());
+
+    std::wstring hint = L"Say \"" + (m_stagedSettings.voiceKeyword.empty() ? L"Snippy snip it" : m_stagedSettings.voiceKeyword) + L"\" to snip";
+    if (m_editingVoiceKeyword) hint += L" (Press Enter to apply)";
+    D2D1_RECT_F hintR = D2D1::RectF(28.0f, 362.0f, 312.0f, 380.0f);
+    m_renderTarget->DrawText(hint.c_str(), static_cast<UINT32>(hint.size()), m_descFormat.Get(), hintR, m_textSecondaryBrush.Get());
+
     // ── Card 4: Debug Logger Console ──
-    D2D1_RECT_F card3 = D2D1::RectF(16.0f, 356.0f, 324.0f, 424.0f);
+    D2D1_RECT_F card3 = D2D1::RectF(16.0f, 398.0f, 324.0f, 466.0f);
     drawCard(card3, L"\uEBE8", L"Debug Logger Console", L"Open a live debug console window for troubleshooting and error tracing.");
-    D2D1_RECT_F cb3 = D2D1::RectF(284.0f, 379.0f, 302.0f, 397.0f);
+    D2D1_RECT_F cb3 = D2D1::RectF(284.0f, 421.0f, 302.0f, 439.0f);
     drawCheckbox(cb3, m_stagedSettings.enableDebugLogger);
 
     // ── Card 5: Customize Overlay ──
-    D2D1_RECT_F card4 = D2D1::RectF(16.0f, 434.0f, 324.0f, 672.0f);
+    D2D1_RECT_F card4 = D2D1::RectF(16.0f, 476.0f, 324.0f, 714.0f);
     drawCard(card4, L"\uE771", L"Customize Overlay", L"Adjust the look and feel of the snipping overlay.");
 
-    D2D1_RECT_F dimLblR = D2D1::RectF(28.0f, 492.0f, 126.0f, 510.0f);
+    D2D1_RECT_F dimLblR = D2D1::RectF(28.0f, 534.0f, 126.0f, 552.0f);
     m_renderTarget->DrawText(L"Background Dim:", 15, m_itemFormat.Get(), dimLblR, m_textPrimaryBrush.Get());
 
     float trackL = 126.0f, trackR = 246.0f;
-    D2D1_RECT_F trackBg1 = D2D1::RectF(trackL, 500.0f, trackR, 504.0f);
+    D2D1_RECT_F trackBg1 = D2D1::RectF(trackL, 542.0f, trackR, 546.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackBg1, 2.0f, 2.0f), m_sliderTrackBgBrush.Get());
     float dimNorm = std::clamp(m_stagedSettings.dimmingOpacity / 100.0f, 0.0f, 1.0f);
     float dimThumbX = trackL + (trackR - trackL) * dimNorm;
-    D2D1_RECT_F trackFill1 = D2D1::RectF(trackL, 500.0f, dimThumbX, 504.0f);
+    D2D1_RECT_F trackFill1 = D2D1::RectF(trackL, 542.0f, dimThumbX, 546.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackFill1, 2.0f, 2.0f), m_accentBrush.Get());
-    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 502.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
-    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 502.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
+    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 544.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
+    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(dimThumbX, 544.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
 
     std::wstring dimStr = std::to_wstring(m_stagedSettings.dimmingOpacity) + L"%";
-    D2D1_RECT_F dimValR = D2D1::RectF(254.0f, 492.0f, 308.0f, 510.0f);
+    D2D1_RECT_F dimValR = D2D1::RectF(254.0f, 534.0f, 308.0f, 552.0f);
     m_renderTarget->DrawText(dimStr.c_str(), static_cast<UINT32>(dimStr.size()), m_itemFormat.Get(), dimValR, m_textSecondaryBrush.Get());
 
-    D2D1_RECT_F brdLblR = D2D1::RectF(28.0f, 524.0f, 126.0f, 542.0f);
+    D2D1_RECT_F brdLblR = D2D1::RectF(28.0f, 566.0f, 126.0f, 584.0f);
     m_renderTarget->DrawText(L"Selection Border:", 17, m_itemFormat.Get(), brdLblR, m_textPrimaryBrush.Get());
 
-    D2D1_RECT_F trackBg2 = D2D1::RectF(trackL, 532.0f, trackR, 536.0f);
+    D2D1_RECT_F trackBg2 = D2D1::RectF(trackL, 574.0f, trackR, 578.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackBg2, 2.0f, 2.0f), m_sliderTrackBgBrush.Get());
     float brdNorm = std::clamp((m_stagedSettings.selectionBorderThickness - 1) / 5.0f, 0.0f, 1.0f);
     float brdThumbX = trackL + (trackR - trackL) * brdNorm;
-    D2D1_RECT_F trackFill2 = D2D1::RectF(trackL, 532.0f, brdThumbX, 536.0f);
+    D2D1_RECT_F trackFill2 = D2D1::RectF(trackL, 574.0f, brdThumbX, 578.0f);
     m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackFill2, 2.0f, 2.0f), m_accentBrush.Get());
-    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 534.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
-    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 534.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
+    m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 576.0f), 6.5f, 6.5f), m_sliderThumbBrush.Get());
+    m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(brdThumbX, 576.0f), 6.5f, 6.5f), m_accentBrush.Get(), 1.0f);
 
     std::wstring brdStr = std::to_wstring(m_stagedSettings.selectionBorderThickness) + L"px";
-    D2D1_RECT_F brdValR = D2D1::RectF(254.0f, 524.0f, 308.0f, 542.0f);
+    D2D1_RECT_F brdValR = D2D1::RectF(254.0f, 566.0f, 308.0f, 584.0f);
     m_renderTarget->DrawText(brdStr.c_str(), static_cast<UINT32>(brdStr.size()), m_itemFormat.Get(), brdValR, m_textSecondaryBrush.Get());
 
-    D2D1_RECT_F posLblR = D2D1::RectF(28.0f, 556.0f, 122.0f, 574.0f);
+    D2D1_RECT_F posLblR = D2D1::RectF(28.0f, 598.0f, 122.0f, 616.0f);
     m_renderTarget->DrawText(L"Toolbar Position:", 17, m_itemFormat.Get(), posLblR, m_textPrimaryBrush.Get());
 
     const WCHAR* posText = (m_stagedSettings.toolbarPosition == L"Bottom") ? L"Bottom Center" : L"Top Center";
-    D2D1_RECT_F comboPos = D2D1::RectF(124.0f, 550.0f, 308.0f, 578.0f);
+    D2D1_RECT_F comboPos = D2D1::RectF(124.0f, 592.0f, 308.0f, 620.0f);
     drawComboBox(comboPos, posText, m_openDropdown == DROPDOWN_TOOLBAR_POS, m_hoverId == ID_TOOLBAR_POS_COMBO);
 
-    D2D1_RECT_F toolsHdrR = D2D1::RectF(28.0f, 590.0f, 308.0f, 608.0f);
+    D2D1_RECT_F toolsHdrR = D2D1::RectF(28.0f, 632.0f, 308.0f, 650.0f);
     m_renderTarget->DrawText(L"Visible Annotation Tools:", 25, m_itemFormat.Get(), toolsHdrR, m_textPrimaryBrush.Get());
 
     auto isToolVisible = [&](const WCHAR* name) {
@@ -577,11 +624,11 @@ void SettingsWindow::Render() noexcept {
                                  hover ? m_textPrimaryBrush.Get() : m_textSecondaryBrush.Get());
     };
 
-    drawToolCheck(ID_TOOL_DRAW,    D2D1::RectF(28.0f,  614.0f, 124.0f, 632.0f), L"Draw Tools", isToolVisible(L"Pen") && isToolVisible(L"Draw"));
-    drawToolCheck(ID_TOOL_SHAPES,  D2D1::RectF(128.0f, 614.0f, 216.0f, 632.0f), L"Shapes",     isToolVisible(L"Shapes"));
-    drawToolCheck(ID_TOOL_BLUR,    D2D1::RectF(220.0f, 614.0f, 308.0f, 632.0f), L"Blur",       isToolVisible(L"Blur"));
-    drawToolCheck(ID_TOOL_TEXT,    D2D1::RectF(28.0f,  640.0f, 124.0f, 658.0f), L"Text",       isToolVisible(L"Text"));
-    drawToolCheck(ID_TOOL_COUNTER, D2D1::RectF(128.0f, 640.0f, 216.0f, 658.0f), L"Counter",    isToolVisible(L"Counter"));
+    drawToolCheck(ID_TOOL_DRAW,    D2D1::RectF(28.0f,  656.0f, 124.0f, 674.0f), L"Draw Tools", isToolVisible(L"Pen") && isToolVisible(L"Draw"));
+    drawToolCheck(ID_TOOL_SHAPES,  D2D1::RectF(128.0f, 656.0f, 216.0f, 674.0f), L"Shapes",     isToolVisible(L"Shapes"));
+    drawToolCheck(ID_TOOL_BLUR,    D2D1::RectF(220.0f, 656.0f, 308.0f, 674.0f), L"Blur",       isToolVisible(L"Blur"));
+    drawToolCheck(ID_TOOL_TEXT,    D2D1::RectF(28.0f,  682.0f, 124.0f, 700.0f), L"Text",       isToolVisible(L"Text"));
+    drawToolCheck(ID_TOOL_COUNTER, D2D1::RectF(128.0f, 682.0f, 216.0f, 700.0f), L"Counter",    isToolVisible(L"Counter"));
 
     m_renderTarget->SetTransform(curTransform);
     m_renderTarget->PopAxisAlignedClip();
@@ -589,7 +636,7 @@ void SettingsWindow::Render() noexcept {
     // ── Scrollbar Indicator ──
     if (m_maxScrollY > 0.0f) {
         float trackH = 448.0f;
-        float thumbH = std::clamp(trackH * (460.0f / 674.0f), 30.0f, trackH);
+        float thumbH = std::clamp(trackH * (460.0f / 730.0f), 30.0f, trackH);
         float thumbY = 52.0f + (trackH - thumbH) * (m_scrollY / m_maxScrollY);
         D2D1_RECT_F thumbR = D2D1::RectF(kBaseWidth - 6.0f, thumbY, kBaseWidth - 3.0f, thumbY + thumbH);
         m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumbR, 1.5f, 1.5f), m_scrollThumbBrush.Get());
@@ -735,19 +782,22 @@ static int HitTest(float x, float y, float scrollY) {
         if (x >= 28.0f && x <= 312.0f && cy >= 186.0f && cy <= 236.0f) return ID_HOTKEY_RECORD_BOX;
         if (x >= 146.0f && x <= 312.0f && cy >= 240.0f && cy <= 262.0f) return ID_HOTKEY_RESET;
 
-        if (x >= 16.0f && x <= 324.0f && cy >= 278.0f && cy <= 346.0f) return ID_VOICE_ACTIVATION_CARD;
-        if (x >= 16.0f && x <= 324.0f && cy >= 356.0f && cy <= 424.0f) return ID_DEBUG_LOGGER_CARD;
+        if (x >= 28.0f && x <= 246.0f && cy >= 328.0f && cy <= 356.0f) return ID_VOICE_KEYWORD_BOX;
+        if (x >= 252.0f && x <= 312.0f && cy >= 328.0f && cy <= 356.0f) return ID_VOICE_KEYWORD_RESET;
+        if (x >= 16.0f && x <= 324.0f && cy >= 278.0f && cy <= 388.0f) return ID_VOICE_ACTIVATION_CARD;
 
-        if (x >= 120.0f && x <= 256.0f && cy >= 486.0f && cy <= 516.0f) return ID_SLIDER_DIMMING;
-        if (x >= 120.0f && x <= 256.0f && cy >= 518.0f && cy <= 548.0f) return ID_SLIDER_BORDER;
-        if (x >= 124.0f && x <= 308.0f && cy >= 550.0f && cy <= 578.0f) return ID_TOOLBAR_POS_COMBO;
+        if (x >= 16.0f && x <= 324.0f && cy >= 398.0f && cy <= 466.0f) return ID_DEBUG_LOGGER_CARD;
 
-        if (cy >= 608.0f && cy <= 634.0f) {
+        if (x >= 120.0f && x <= 256.0f && cy >= 528.0f && cy <= 558.0f) return ID_SLIDER_DIMMING;
+        if (x >= 120.0f && x <= 256.0f && cy >= 560.0f && cy <= 590.0f) return ID_SLIDER_BORDER;
+        if (x >= 124.0f && x <= 308.0f && cy >= 592.0f && cy <= 620.0f) return ID_TOOLBAR_POS_COMBO;
+
+        if (cy >= 650.0f && cy <= 676.0f) {
             if (x >= 28.0f && x < 126.0f)  return ID_TOOL_DRAW;
             if (x >= 126.0f && x < 218.0f) return ID_TOOL_SHAPES;
             if (x >= 218.0f && x <= 312.0f) return ID_TOOL_BLUR;
         }
-        if (cy >= 636.0f && cy <= 662.0f) {
+        if (cy >= 678.0f && cy <= 704.0f) {
             if (x >= 28.0f && x < 126.0f)  return ID_TOOL_TEXT;
             if (x >= 126.0f && x < 218.0f) return ID_TOOL_COUNTER;
         }
@@ -779,7 +829,7 @@ void SettingsWindow::OnLButtonDown(POINT pt) noexcept {
     }
 
     if (m_openDropdown == DROPDOWN_TOOLBAR_POS) {
-        float comboTop = 46.0f - m_scrollY + 550.0f;
+        float comboTop = 46.0f - m_scrollY + 592.0f;
         float comboBottom = comboTop + 28.0f;
         bool popUpward = (comboBottom + 72.0f > 506.0f);
         float topY = popUpward ? (comboTop - 2.0f - 72.0f) : (comboBottom + 2.0f);
@@ -794,6 +844,10 @@ void SettingsWindow::OnLButtonDown(POINT pt) noexcept {
     }
 
     int id = HitTest(x, y, m_scrollY);
+
+    if (id != ID_VOICE_KEYWORD_BOX && id != ID_VOICE_KEYWORD_RESET && m_editingVoiceKeyword) {
+        StopEditingVoiceKeyword();
+    }
 
     if (y < 46.0f && id != ID_CLOSE_BTN) {
         ReleaseCapture();
@@ -857,6 +911,16 @@ void SettingsWindow::OnLButtonDown(POINT pt) noexcept {
 
     case ID_VOICE_ACTIVATION_CARD:
         m_stagedSettings.enableVoiceActivation = !m_stagedSettings.enableVoiceActivation;
+        StopEditingVoiceKeyword();
+        break;
+
+    case ID_VOICE_KEYWORD_BOX:
+        StartEditingVoiceKeyword();
+        break;
+
+    case ID_VOICE_KEYWORD_RESET:
+        m_stagedSettings.voiceKeyword = L"Snippy snip it";
+        StopEditingVoiceKeyword();
         break;
 
     case ID_DEBUG_LOGGER_CARD:
@@ -948,7 +1012,7 @@ void SettingsWindow::OnMouseMove(POINT pt) noexcept {
     }
 
     if (m_openDropdown == DROPDOWN_TOOLBAR_POS) {
-        float comboTop = 46.0f - m_scrollY + 550.0f;
+        float comboTop = 46.0f - m_scrollY + 592.0f;
         float comboBottom = comboTop + 28.0f;
         bool popUpward = (comboBottom + 72.0f > 506.0f);
         float topY = popUpward ? (comboTop - 2.0f - 72.0f) : (comboBottom + 2.0f);
@@ -1000,6 +1064,33 @@ void SettingsWindow::StopRecording() noexcept {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+void SettingsWindow::StartEditingVoiceKeyword() noexcept {
+    m_editingVoiceKeyword = true;
+    m_caretVisible = true;
+    m_lastVoiceInputTime = GetTickCount64();
+    if (m_hwnd) {
+        SetTimer(m_hwnd, kTimerCaretBlink, GetCaretBlinkInterval(), nullptr);
+    }
+    if (m_isRecording) {
+        StopRecording();
+    }
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void SettingsWindow::StopEditingVoiceKeyword() noexcept {
+    if (m_editingVoiceKeyword) {
+        m_editingVoiceKeyword = false;
+        m_caretVisible = false;
+        if (m_hwnd) {
+            KillTimer(m_hwnd, kTimerCaretBlink);
+        }
+        if (m_stagedSettings.voiceKeyword.empty()) {
+            m_stagedSettings.voiceKeyword = L"Snippy snip it";
+        }
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+}
+
 static bool IsModifierVk(WPARAM vk) noexcept {
     return vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT ||
            vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
@@ -1014,6 +1105,26 @@ static bool IsAlphanumericVk(WPARAM vk) noexcept {
 }
 
 void SettingsWindow::OnKeyDown(WPARAM vk) noexcept {
+    if (m_editingVoiceKeyword) {
+        if (vk == VK_RETURN || vk == VK_ESCAPE) {
+            StopEditingVoiceKeyword();
+            return;
+        }
+        if (vk == VK_BACK) {
+            if (!m_stagedSettings.voiceKeyword.empty()) {
+                m_stagedSettings.voiceKeyword.pop_back();
+                m_caretVisible = true;
+                m_lastVoiceInputTime = GetTickCount64();
+                if (m_hwnd) {
+                    SetTimer(m_hwnd, kTimerCaretBlink, GetCaretBlinkInterval(), nullptr);
+                }
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        return;
+    }
+
     if (!m_isRecording) return;
 
     if (vk == VK_ESCAPE) {
@@ -1076,8 +1187,24 @@ void SettingsWindow::OnKeyUp(WPARAM vk) noexcept {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+void SettingsWindow::OnChar(WPARAM ch) noexcept {
+    if (!m_editingVoiceKeyword) return;
+    if (ch >= 32 && ch != 127) {
+        if (m_stagedSettings.voiceKeyword.size() < 30) {
+            m_stagedSettings.voiceKeyword.push_back(static_cast<wchar_t>(ch));
+            m_caretVisible = true;
+            m_lastVoiceInputTime = GetTickCount64();
+            if (m_hwnd) {
+                SetTimer(m_hwnd, kTimerCaretBlink, GetCaretBlinkInterval(), nullptr);
+            }
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+    }
+}
+
 void SettingsWindow::SaveAndApply() noexcept {
     if (m_isRecording) StopRecording();
+    StopEditingVoiceKeyword();
 
     SettingsManager::Current() = m_stagedSettings;
     SettingsManager::SaveSettings();
@@ -1096,6 +1223,7 @@ void SettingsWindow::ResetToDefaults() noexcept {
     SettingsManager::ResetToDefaults();
     m_stagedSettings = SettingsManager::Current();
     m_isRecording = false;
+    StopEditingVoiceKeyword();
     m_statusError.clear();
     ApplyThemePalette(m_stagedSettings.theme);
     InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1145,7 +1273,18 @@ LRESULT SettingsWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) no
         OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam));
         return 0;
 
+    case WM_CHAR:
+        if (m_editingVoiceKeyword) {
+            OnChar(wParam);
+            return 0;
+        }
+        break;
+
     case WM_KEYDOWN:
+        if (m_editingVoiceKeyword) {
+            OnKeyDown(wParam);
+            return 0;
+        }
         if (m_isRecording) {
             OnKeyDown(wParam);
             return 0;
@@ -1177,6 +1316,9 @@ LRESULT SettingsWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) no
         if (m_isRecording) {
             StopRecording();
         }
+        if (m_editingVoiceKeyword) {
+            StopEditingVoiceKeyword();
+        }
         break;
 
     case WM_TIMER:
@@ -1184,6 +1326,24 @@ LRESULT SettingsWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) no
             KillTimer(m_hwnd, kTimerSaveFeedback);
             m_saveFeedback = false;
             Hide();
+            return 0;
+        }
+        if (wParam == kTimerCaretBlink) {
+            if (!m_editingVoiceKeyword) {
+                KillTimer(m_hwnd, kTimerCaretBlink);
+                return 0;
+            }
+            ULONGLONG now = GetTickCount64();
+            UINT blinkInterval = GetCaretBlinkInterval();
+            if (now - m_lastVoiceInputTime < blinkInterval) {
+                if (!m_caretVisible) {
+                    m_caretVisible = true;
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                }
+            } else {
+                m_caretVisible = !m_caretVisible;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
             return 0;
         }
         break;

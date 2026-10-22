@@ -1386,7 +1386,6 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
             } else if (btn == 1) {
                 // Copy all text
                 Clipboard::WriteText(m_ocrResult.fullText.c_str(), m_hwnd);
-                MessageBeep(MB_OK);
                 Hide();
                 if (OnCancel) OnCancel();
                 return;
@@ -1405,7 +1404,6 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
             local.y >= m_ocrQuickActionRect.top && local.y <= m_ocrQuickActionRect.bottom) {
             std::wstring txt = GetSelectedOcrText();
             Clipboard::WriteText(txt.c_str(), m_hwnd);
-            MessageBeep(MB_OK);
             Hide();
             if (OnCancel) OnCancel();
             return;
@@ -1992,7 +1990,6 @@ void OverlayWindow::OnLButtonUp(POINT pt) noexcept {
                 std::wstring txt = GetSelectedOcrText();
                 if (!txt.empty()) {
                     Clipboard::WriteText(txt.c_str(), m_hwnd);
-                    MessageBeep(MB_OK);
                 }
                 float qX = static_cast<float>(local.x) - 50.f;
                 float qY = static_cast<float>(local.y) + 12.f;
@@ -2266,7 +2263,6 @@ void OverlayWindow::OnKeyDown(WPARAM vk) noexcept {
         if (vk == VK_RETURN) {
             std::wstring txt = GetSelectedOcrText();
             Clipboard::WriteText(txt.c_str(), m_hwnd);
-            MessageBeep(MB_OK);
             Hide();
             if (OnCancel) OnCancel();
             return;
@@ -2274,7 +2270,6 @@ void OverlayWindow::OnKeyDown(WPARAM vk) noexcept {
         if (vk == 'C' && ctrl) {
             std::wstring txt = GetSelectedOcrText();
             Clipboard::WriteText(txt.c_str(), m_hwnd);
-            MessageBeep(MB_OK);
             Hide();
             if (OnCancel) OnCancel();
             return;
@@ -3357,7 +3352,6 @@ void OverlayWindow::CopyToClipboard() noexcept {
     Clipboard::WriteDIB(tempFb, full, m_hwnd);
     Clipboard::WritePNGAsync(tempFb, full);
 
-    MessageBeep(MB_OK);
     Hide();
     if (OnCancel) OnCancel();
 }
@@ -3420,7 +3414,6 @@ void OverlayWindow::SaveToFile() noexcept {
         }
     }
 
-    MessageBeep(MB_OK);
     Hide();
     if (OnCancel) OnCancel();
 }
@@ -5154,7 +5147,6 @@ LRESULT OverlayWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) noe
                             }
                         }
                         Clipboard::WriteText(w.text.c_str(), m_hwnd);
-                        MessageBeep(MB_OK);
                         m_ocrQuickActionPos = { static_cast<float>(local.x) - 40.f, static_cast<float>(local.y) + 12.f };
                         m_ocrQuickActionVisible = true;
                         RenderFrame();

@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 
 namespace snippy {
 
@@ -14,6 +15,9 @@ public:
     void Start() noexcept;
     void Stop() noexcept;
     void Shutdown() noexcept;
+
+    void SetKeyword(const std::wstring& keyword) noexcept;
+    [[nodiscard]] std::wstring GetKeyword() const noexcept;
 
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] bool IsSupported() const noexcept;

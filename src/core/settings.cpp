@@ -77,10 +77,11 @@ static std::string WideToNarrow(const std::wstring& w) {
 }
 
 std::string SerializeSettingsJson(const AppSettings& s) {
-    std::string narrowKey    = WideToNarrow(s.keyName);
-    std::string narrowTheme  = WideToNarrow(s.theme);
-    std::string narrowPos    = WideToNarrow(s.toolbarPosition);
-    std::string narrowAccent = WideToNarrow(s.accentColor);
+    std::string narrowKey     = WideToNarrow(s.keyName);
+    std::string narrowTheme   = WideToNarrow(s.theme);
+    std::string narrowPos     = WideToNarrow(s.toolbarPosition);
+    std::string narrowAccent  = WideToNarrow(s.accentColor);
+    std::string narrowVoiceKw = WideToNarrow(s.voiceKeyword.empty() ? L"Snippy snip it" : s.voiceKeyword);
 
     std::ostringstream ss;
     ss << "{\n";
@@ -91,6 +92,7 @@ std::string SerializeSettingsJson(const AppSettings& s) {
     ss << "  \"KeyName\": \"" << narrowKey << "\",\n";
     ss << "  \"Theme\": \"" << narrowTheme << "\",\n";
     ss << "  \"EnableVoiceActivation\": " << (s.enableVoiceActivation ? "true" : "false") << ",\n";
+    ss << "  \"VoiceKeyword\": \"" << narrowVoiceKw << "\",\n";
     ss << "  \"EnableDebugLogger\": " << (s.enableDebugLogger ? "true" : "false") << ",\n";
     ss << "  \"AccentColor\": \"" << narrowAccent << "\",\n";
     ss << "  \"DimmingOpacity\": " << s.dimmingOpacity << ",\n";
@@ -118,6 +120,10 @@ bool DeserializeSettingsJson(const std::string& json, AppSettings& out) {
 
     ExtractJsonString(json, "\"Theme\"", out.theme);
     ExtractJsonBool(json, "\"EnableVoiceActivation\"", out.enableVoiceActivation);
+    ExtractJsonString(json, "\"VoiceKeyword\"", out.voiceKeyword);
+    if (out.voiceKeyword.empty()) {
+        out.voiceKeyword = L"Snippy snip it";
+    }
     ExtractJsonBool(json, "\"EnableDebugLogger\"", out.enableDebugLogger);
 
     ExtractJsonString(json, "\"AccentColor\"", out.accentColor);

@@ -16,6 +16,7 @@ struct AppSettings {
 
     std::wstring theme = L"System";
     bool enableVoiceActivation = true;
+    std::wstring voiceKeyword = L"Snippy snip it";
     bool enableDebugLogger = false;
     bool runAtStartup = false;
 
