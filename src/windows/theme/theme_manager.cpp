@@ -98,17 +98,12 @@ ThemePalette ThemeManager::GetPalette(const std::wstring& themeSetting, const st
 
     // Accent color
     if (!useAccentColor) {
-        if (p.isLight) {
-            p.accent = D2D1::ColorF(0.20f, 0.20f, 0.22f, 1.0f); // Sleek neutral charcoal
-            p.accentHover = D2D1::ColorF(0.32f, 0.32f, 0.35f, 1.0f);
-        } else {
-            p.accent = D2D1::ColorF(0.88f, 0.88f, 0.90f, 1.0f); // Crisp neutral silver/white
-            p.accentHover = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
-        }
+        // When OFF: default color is Fluent / Snippy Blue (#0078D4)
+        p.accent = D2D1::ColorF(0.0f, 0.471f, 0.831f, 1.0f);
+        p.accentHover = D2D1::ColorF(0.08f, 0.55f, 0.91f, 1.0f);
     } else {
-        if (customAccent.empty() || !ParseHexColor(customAccent, p.accent)) {
-            p.accent = GetWindowsAccentColor();
-        }
+        // When ON: match the accent color of the OS
+        p.accent = GetWindowsAccentColor();
 
         // Hover state is slightly lighter / brighter
         p.accentHover = D2D1::ColorF(

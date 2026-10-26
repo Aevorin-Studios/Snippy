@@ -5,7 +5,7 @@
 namespace snippy {
 
 inline constexpr const wchar_t* kCurrentVersion   = L"1.0.0";
-inline constexpr int            kCurrentBuild     = 7;
+inline constexpr int            kCurrentBuild     = 8;
 inline constexpr const wchar_t* kDefaultUpdateUrl = L"https://raw.githubusercontent.com/Aevorin-Studios/Snippy-for-Windows/main/version.json";
 
 struct AppVersion {
