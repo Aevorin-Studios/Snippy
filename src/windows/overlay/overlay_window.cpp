@@ -7,6 +7,8 @@
 #include "../theme/theme_manager.h"
 #include "../utils/logger.h"
 #include "ocr_extract.h"
+#include "../qr/qr_extract.h"
+#include <shellapi.h>
 #include <d2d1effects_2.h>
 #include <cstdio>
 #include <wchar.h>
@@ -83,7 +85,7 @@ void OverlayWindow::LoadToolbarSettings() noexcept {
     m_toolbarAtTop = (_wcsicmp(s.toolbarPosition.c_str(), L"Bottom") != 0);
     m_hiddenTools = s.hiddenTools;
 
-    ThemePalette palette = ThemeManager::GetPalette(s.theme, s.accentColor);
+    ThemePalette palette = ThemeManager::GetPalette(s.theme, s.accentColor, s.useAccentColor);
     m_toolbarAccent = palette.accent;
     m_toolbarDark = !palette.isLight;
 
@@ -471,6 +473,15 @@ void OverlayWindow::Show(const FrameBuffer& frameBuffer, const MonitorInfo& moni
     m_penSizeDragging = false;
     m_colorSpectrumDragging = false;
     m_colorHueDragging = false;
+    m_qrDetected = false;
+    m_qrHovered = false;
+    m_qrTooltipHoverBtn = 0;
+    m_qrHighlightRect = {};
+    m_qrBadgeRect = {};
+    m_qrTooltipRect = {};
+    m_qrOpenBtnRect = {};
+    m_qrCopyBtnRect = {};
+    ++m_qrScanSeq;
 
     auto* dc = g_d2d.D2DDevCtx();
 
@@ -567,6 +578,15 @@ void OverlayWindow::Hide() noexcept {
     m_ocrQuickActionVisible = false;
     m_ocrHoverButton = -1;
     m_ocrQuickActionHover = false;
+    m_qrDetected = false;
+    m_qrHovered = false;
+    m_qrTooltipHoverBtn = 0;
+    m_qrHighlightRect = {};
+    m_qrBadgeRect = {};
+    m_qrTooltipRect = {};
+    m_qrOpenBtnRect = {};
+    m_qrCopyBtnRect = {};
+    ++m_qrScanSeq;
 
     // Clear swapchain surface immediately so no old image/annotations remain in GPU buffer
     if (m_swapChain) {
@@ -598,6 +618,7 @@ void OverlayWindow::ApplyFullscreenSelection() noexcept {
     m_annotations.clear();
     m_undoStack.clear();
     m_redoStack.clear();
+    StartAutoQrScan();
 }
 
 void OverlayWindow::CommitLassoSelection() noexcept {
@@ -632,6 +653,7 @@ void OverlayWindow::CommitLassoSelection() noexcept {
     m_annotations.clear();
     m_undoStack.clear();
     m_redoStack.clear();
+    StartAutoQrScan();
 }
 
 bool OverlayWindow::IsPointInFreeform(D2D1_POINT_2F pt) const noexcept {
@@ -708,6 +730,222 @@ void OverlayWindow::OnOcrComplete(const OcrInlineResult& res) noexcept {
     m_ocrLoading = false;
     m_ocrResult = res;
     RenderFrame();
+}
+
+struct QrScanMsg {
+    uint32_t seq = 0;
+    QrResult result{};
+};
+
+void OverlayWindow::StartAutoQrScan() noexcept {
+    m_qrDetected = false;
+    m_qrHovered = false;
+    m_qrTooltipHoverBtn = 0;
+    m_qrHighlightRect = {};
+    m_qrBadgeRect = {};
+    m_qrTooltipRect = {};
+    m_qrOpenBtnRect = {};
+    m_qrCopyBtnRect = {};
+
+    if (!m_frameBuffer || !m_frameBuffer->IsValid()) return;
+    if (m_captureMode == CaptureMode::ColorPicker || m_captureMode == CaptureMode::TextExtract) return;
+
+    bool hasSel = m_selection.IsValid();
+    std::vector<uint8_t> selPixels;
+    uint32_t selW = 0, selH = 0;
+    float selLeft = 0.f, selTop = 0.f;
+    if (hasSel) {
+        RECT buf = BufferRect(m_selection.NormalizedRect());
+        FrameBuffer view = m_frameBuffer->SubRegion(buf);
+        if (view.IsValid()) {
+            selW = view.width;
+            selH = view.height;
+            selLeft = static_cast<float>(m_selection.NormalizedRect().left - m_monitorRect.left);
+            selTop  = static_cast<float>(m_selection.NormalizedRect().top  - m_monitorRect.top);
+            selPixels.resize(static_cast<size_t>(selW) * selH * 4);
+            for (UINT row = 0; row < selH; ++row) {
+                memcpy(selPixels.data() + static_cast<size_t>(row) * selW * 4,
+                       view.RowPtr(row), static_cast<size_t>(selW) * 4);
+            }
+        } else {
+            hasSel = false;
+        }
+    }
+
+    uint32_t fullW = m_frameBuffer->width;
+    uint32_t fullH = m_frameBuffer->height;
+    std::vector<uint8_t> fullPixels;
+    fullPixels.resize(static_cast<size_t>(fullW) * fullH * 4);
+    for (UINT row = 0; row < fullH; ++row) {
+        memcpy(fullPixels.data() + static_cast<size_t>(row) * fullW * 4,
+               m_frameBuffer->RowPtr(row), static_cast<size_t>(fullW) * 4);
+    }
+
+    const uint32_t seq = ++m_qrScanSeq;
+    HWND hwnd = m_hwnd;
+
+    std::thread([hasSel, selPixels = std::move(selPixels), selW, selH, selLeft, selTop,
+                 fullPixels = std::move(fullPixels), fullW, fullH, hwnd, seq]() {
+        QrResult res{};
+        if (hasSel) {
+            res = ScanQrFromBgra(selPixels.data(), selW, selH);
+            if (res.success) {
+                res.bounds.left   += selLeft;
+                res.bounds.top    += selTop;
+                res.bounds.right  += selLeft;
+                res.bounds.bottom += selTop;
+            }
+        }
+        if (!res.success) {
+            res = ScanQrFromBgra(fullPixels.data(), fullW, fullH);
+        }
+
+        auto* qrMsg = new QrScanMsg{ seq, std::move(res) };
+        PostMessageW(hwnd, WM_USER + 106, 0, reinterpret_cast<LPARAM>(qrMsg));
+    }).detach();
+}
+
+void OverlayWindow::OnQrComplete(uint32_t seq, const QrResult& res) noexcept {
+    if (seq != m_qrScanSeq || !IsEditorOpen()) return;
+    if (!res.success) {
+        m_qrDetected = false;
+        RenderFrame();
+        return;
+    }
+
+    m_qrDetected = true;
+    m_qrResult = res;
+
+    m_qrHighlightRect = res.bounds;
+
+    float badgeW = res.isUrl ? 74.f : 62.f;
+    float badgeH = 22.f;
+    float bx = m_qrHighlightRect.left;
+    float by = m_qrHighlightRect.top - badgeH - 3.f;
+    if (by < 4.f) {
+        by = m_qrHighlightRect.top + 4.f;
+        bx = m_qrHighlightRect.left + 4.f;
+    }
+    m_qrBadgeRect = D2D1::RectF(bx, by, bx + badgeW, by + badgeH);
+
+    RenderFrame();
+}
+
+void OverlayWindow::RenderQrHighlight(ID2D1DeviceContext* dc) noexcept {
+    if (!m_qrDetected || !IsEditorOpen()) return;
+
+    ComPtr<ID2D1SolidColorBrush> fillBrush;
+    ComPtr<ID2D1SolidColorBrush> borderBrush;
+    dc->CreateSolidColorBrush(D2D1::ColorF(m_toolbarAccent.r, m_toolbarAccent.g, m_toolbarAccent.b, m_qrHovered ? 0.22f : 0.12f), &fillBrush);
+    dc->CreateSolidColorBrush(m_toolbarAccent, &borderBrush);
+
+    D2D1_ROUNDED_RECT boxR = D2D1::RoundedRect(m_qrHighlightRect, 4.f, 4.f);
+    dc->FillRoundedRectangle(boxR, fillBrush.Get());
+    dc->DrawRoundedRectangle(boxR, borderBrush.Get(), m_qrHovered ? 2.0f : 1.5f);
+
+    D2D1_ROUNDED_RECT badgeR = D2D1::RoundedRect(m_qrBadgeRect, 4.f, 4.f);
+    dc->FillRoundedRectangle(badgeR, m_toolbarBgBrush.Get());
+    dc->DrawRoundedRectangle(badgeR, m_toolbarBorderBrush.Get(), 1.0f);
+
+    DrawFluentGlyph(dc, L'\uED14', D2D1::RectF(m_qrBadgeRect.left + 5.f, m_qrBadgeRect.top + 3.f,
+                                               m_qrBadgeRect.left + 19.f, m_qrBadgeRect.bottom - 3.f),
+                    m_toolbarActiveBrush.Get(), g_dwrite.IconFont14());
+    const WCHAR* badgeText = m_qrResult.isUrl ? L"QR Link" : L"QR Code";
+    dc->DrawTextW(badgeText, static_cast<UINT32>(wcslen(badgeText)), g_dwrite.UIFont(),
+                  D2D1::RectF(m_qrBadgeRect.left + 22.f, m_qrBadgeRect.top + 2.f,
+                              m_qrBadgeRect.right - 4.f, m_qrBadgeRect.bottom - 2.f), m_labelFgBrush.Get());
+
+    if (!m_qrHovered) return;
+
+    const float tipW = 340.f;
+    const float tipH = m_qrResult.isUrl ? 74.f : 62.f;
+
+    float tipX = (m_qrHighlightRect.left + m_qrHighlightRect.right) * 0.5f - tipW * 0.5f;
+    float tipY = m_qrHighlightRect.bottom + 8.f;
+    float monW = static_cast<float>(m_monitorRect.right - m_monitorRect.left);
+    float monH = static_cast<float>(m_monitorRect.bottom - m_monitorRect.top);
+
+    if (tipX < 12.f) tipX = 12.f;
+    if (tipX + tipW > monW - 12.f) tipX = monW - 12.f - tipW;
+    if (tipY + tipH > monH - 12.f) {
+        tipY = m_qrHighlightRect.top - tipH - 8.f;
+        if (tipY < 12.f) tipY = 12.f;
+    }
+
+    m_qrTooltipRect = D2D1::RectF(tipX, tipY, tipX + tipW, tipY + tipH);
+
+    D2D1_ROUNDED_RECT shadowR = D2D1::RoundedRect(
+        D2D1::RectF(tipX - 1.f, tipY + 2.f, tipX + tipW + 1.f, tipY + tipH + 4.f), 8.f, 8.f);
+    dc->FillRoundedRectangle(shadowR, m_toolbarShadowBrush.Get());
+
+    D2D1_ROUNDED_RECT tipR = D2D1::RoundedRect(m_qrTooltipRect, 8.f, 8.f);
+    dc->FillRoundedRectangle(tipR, m_toolbarBgBrush.Get());
+    dc->DrawRoundedRectangle(tipR, m_toolbarBorderBrush.Get(), 1.0f);
+
+    const float row1Top = tipY + 8.f;
+    const float row1Bottom = tipY + 34.f;
+
+    WCHAR iconGlyph = m_qrResult.isUrl ? L'\uE71B' : L'\uED14';
+    DrawFluentGlyph(dc, iconGlyph, D2D1::RectF(tipX + 10.f, row1Top, tipX + 26.f, row1Bottom),
+                    m_toolbarActiveBrush.Get(), g_dwrite.IconFont14());
+
+    const std::wstring& displayStr = m_qrResult.isUrl ? m_qrResult.url : m_qrResult.payload;
+    D2D1_RECT_F textRect = D2D1::RectF(tipX + 30.f, row1Top, tipX + tipW - 12.f, row1Bottom);
+    ComPtr<ID2D1SolidColorBrush> previewBrush;
+    dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 0.90f), &previewBrush);
+    dc->DrawTextW(displayStr.c_str(), static_cast<UINT32>(displayStr.size()), g_dwrite.UIFont(), textRect, previewBrush.Get());
+
+    if (m_qrResult.isUrl) {
+        m_qrOpenBtnRect = D2D1::RectF(tipX + tipW - 146.f, tipY + tipH - 30.f, tipX + tipW - 76.f, tipY + tipH - 6.f);
+        D2D1_ROUNDED_RECT openR = D2D1::RoundedRect(m_qrOpenBtnRect, 4.f, 4.f);
+        dc->FillRoundedRectangle(openR, m_toolbarActiveBrush.Get());
+        if (m_qrTooltipHoverBtn == 1) {
+            ComPtr<ID2D1SolidColorBrush> hl;
+            dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 0.15f), &hl);
+            dc->FillRoundedRectangle(openR, hl.Get());
+        }
+        DrawFluentGlyph(dc, L'\uE8A7', D2D1::RectF(m_qrOpenBtnRect.left + 6.f, m_qrOpenBtnRect.top,
+                                                   m_qrOpenBtnRect.left + 22.f, m_qrOpenBtnRect.bottom),
+                        m_labelFgBrush.Get(), g_dwrite.IconFont14());
+        const WCHAR* openText = L"Open";
+        dc->DrawTextW(openText, static_cast<UINT32>(wcslen(openText)), g_dwrite.UIFont(),
+                      D2D1::RectF(m_qrOpenBtnRect.left + 24.f, m_qrOpenBtnRect.top,
+                                  m_qrOpenBtnRect.right - 4.f, m_qrOpenBtnRect.bottom), m_labelFgBrush.Get());
+
+        m_qrCopyBtnRect = D2D1::RectF(tipX + tipW - 70.f, tipY + tipH - 30.f, tipX + tipW - 8.f, tipY + tipH - 6.f);
+        D2D1_ROUNDED_RECT copyR = D2D1::RoundedRect(m_qrCopyBtnRect, 4.f, 4.f);
+        dc->FillRoundedRectangle(copyR, m_toolbarHoverBrush.Get());
+        dc->DrawRoundedRectangle(copyR, m_toolbarBorderBrush.Get(), 1.0f);
+        if (m_qrTooltipHoverBtn == 2) {
+            ComPtr<ID2D1SolidColorBrush> hl;
+            dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 0.10f), &hl);
+            dc->FillRoundedRectangle(copyR, hl.Get());
+        }
+        DrawFluentGlyph(dc, L'\uE8C8', D2D1::RectF(m_qrCopyBtnRect.left + 6.f, m_qrCopyBtnRect.top,
+                                                   m_qrCopyBtnRect.left + 22.f, m_qrCopyBtnRect.bottom),
+                        m_toolbarIconBrush.Get(), g_dwrite.IconFont14());
+        const WCHAR* copyText = L"Copy";
+        dc->DrawTextW(copyText, static_cast<UINT32>(wcslen(copyText)), g_dwrite.UIFont(),
+                      D2D1::RectF(m_qrCopyBtnRect.left + 24.f, m_qrCopyBtnRect.top,
+                                  m_qrCopyBtnRect.right - 4.f, m_qrCopyBtnRect.bottom), m_labelFgBrush.Get());
+    } else {
+        m_qrOpenBtnRect = {};
+        m_qrCopyBtnRect = D2D1::RectF(tipX + tipW - 90.f, tipY + tipH - 30.f, tipX + tipW - 8.f, tipY + tipH - 6.f);
+        D2D1_ROUNDED_RECT copyR = D2D1::RoundedRect(m_qrCopyBtnRect, 4.f, 4.f);
+        dc->FillRoundedRectangle(copyR, m_toolbarActiveBrush.Get());
+        if (m_qrTooltipHoverBtn == 2) {
+            ComPtr<ID2D1SolidColorBrush> hl;
+            dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 0.15f), &hl);
+            dc->FillRoundedRectangle(copyR, hl.Get());
+        }
+        DrawFluentGlyph(dc, L'\uE8C8', D2D1::RectF(m_qrCopyBtnRect.left + 8.f, m_qrCopyBtnRect.top,
+                                                   m_qrCopyBtnRect.left + 24.f, m_qrCopyBtnRect.bottom),
+                        m_labelFgBrush.Get(), g_dwrite.IconFont14());
+        const WCHAR* copyText = L"Copy";
+        dc->DrawTextW(copyText, static_cast<UINT32>(wcslen(copyText)), g_dwrite.UIFont(),
+                      D2D1::RectF(m_qrCopyBtnRect.left + 26.f, m_qrCopyBtnRect.top,
+                                  m_qrCopyBtnRect.right - 6.f, m_qrCopyBtnRect.bottom), m_labelFgBrush.Get());
+    }
 }
 
 int OverlayWindow::GetClosestOcrCharIndex(D2D1_POINT_2F pt) const noexcept {
@@ -995,46 +1233,9 @@ void OverlayWindow::RenderFrame() noexcept {
             DrawColorPickerHud(dc, cursor);
     }
 
-    if (IsEditorOpen()) {
-        RECT sel = m_selection.NormalizedRect();
-        float sx = static_cast<float>(sel.left   - mr.left);
-        float sy = static_cast<float>(sel.top    - mr.top);
-        float sw = static_cast<float>(sel.right  - sel.left);
-        float sh = static_cast<float>(sel.bottom - sel.top);
-
-        ComPtr<ID2D1PathGeometry> freeformClip;
-        ComPtr<ID2D1Layer> freeformLayer;
-        if (m_captureMode == CaptureMode::Freeform && m_lassoPoints.size() >= 3) {
-            ComPtr<ID2D1Factory> factory;
-            dc->GetFactory(&factory);
-            if (SUCCEEDED(factory->CreatePathGeometry(&freeformClip))) {
-                ComPtr<ID2D1GeometrySink> sink;
-                if (SUCCEEDED(freeformClip->Open(&sink))) {
-                    sink->BeginFigure(m_lassoPoints[0], D2D1_FIGURE_BEGIN_FILLED);
-                    sink->AddLines(&m_lassoPoints[1], static_cast<UINT32>(m_lassoPoints.size() - 1));
-                    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-                    sink->Close();
-                    if (SUCCEEDED(dc->CreateLayer(nullptr, &freeformLayer))) {
-                        dc->PushLayer(D2D1::LayerParameters(
-                            D2D1::InfiniteRect(),
-                            freeformClip.Get(),
-                            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
-                        ), freeformLayer.Get());
-                    }
-                }
-            }
-        } else {
-            dc->PushAxisAlignedClip(D2D1::RectF(sx, sy, sx + sw, sy + sh), D2D1_ANTIALIAS_MODE_ALIASED);
-        }
-
+    if (IsEditorOpen() || m_isReselecting || !m_annotations.empty()) {
         RenderAnnotations(dc);
         RenderPreview(dc);
-
-        if (freeformLayer) {
-            dc->PopLayer();
-        } else {
-            dc->PopAxisAlignedClip();
-        }
     }
 
     DrawSelection(dc);
@@ -1048,6 +1249,9 @@ void OverlayWindow::RenderFrame() noexcept {
         RenderOcrOverlay(dc);
     } else {
         RenderFloatingToolbar(dc);
+        if (m_qrDetected && IsEditorOpen()) {
+            RenderQrHighlight(dc);
+        }
     }
 
     dc->EndDraw();
@@ -1364,6 +1568,23 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
     SetActiveWindow(m_hwnd);
     SetFocus(m_hwnd);
 
+    if (m_qrDetected && m_qrHovered) {
+        if (m_qrResult.isUrl &&
+            local.x >= m_qrOpenBtnRect.left && local.x <= m_qrOpenBtnRect.right &&
+            local.y >= m_qrOpenBtnRect.top && local.y <= m_qrOpenBtnRect.bottom) {
+            ShellExecuteW(nullptr, L"open", m_qrResult.url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            Clipboard::WriteText(m_qrResult.url.c_str(), m_hwnd);
+            Hide();
+            return;
+        }
+        if (local.x >= m_qrCopyBtnRect.left && local.x <= m_qrCopyBtnRect.right &&
+            local.y >= m_qrCopyBtnRect.top && local.y <= m_qrCopyBtnRect.bottom) {
+            const auto& str = m_qrResult.isUrl ? m_qrResult.url : m_qrResult.payload;
+            Clipboard::WriteText(str.c_str(), m_hwnd);
+            return;
+        }
+    }
+
     if (m_ocrActive) {
         // 1. Check click on OcrTopPillBar:
         if (local.x >= m_ocrTopPillRect.left && local.x <= m_ocrTopPillRect.right &&
@@ -1521,10 +1742,6 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
             return;
         }
 
-        if (!inside) {
-            return;
-        }
-
         if (m_toolMode == ToolMode::Select) {
             int annHandle = HitTestSelectedAnnotationHandle(cpt);
             if (annHandle != -1) {
@@ -1536,9 +1753,31 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
                 return;
             }
 
+            // If an annotation is already selected, clicking anywhere inside its selection box drags it
+            if (m_selectedAnnotationIndex >= 0 && m_selectedAnnotationIndex < static_cast<int>(m_annotations.size())) {
+                D2D1_RECT_F selB = GetAnnotationBounds(m_annotations[m_selectedAnnotationIndex]);
+                selB.left -= 4.f; selB.top -= 4.f; selB.right += 4.f; selB.bottom += 4.f;
+                if ((cpt.x >= selB.left && cpt.x <= selB.right &&
+                     cpt.y >= selB.top && cpt.y <= selB.bottom) ||
+                    AnnotationHit(m_annotations[m_selectedAnnotationIndex], cpt)) {
+                    m_annotationResizeHandle = 8;
+                    m_annotationDragUndoPushed = false;
+                    m_dragStartPoint = cpt;
+                    m_dragStartAnnotation = m_annotations[m_selectedAnnotationIndex];
+                    m_annotationStartBounds = GetAnnotationBounds(m_dragStartAnnotation);
+                    return;
+                }
+            }
+
             int hitIndex = -1;
             for (int i = static_cast<int>(m_annotations.size()) - 1; i >= 0; --i) {
-                if (AnnotationHit(m_annotations[i], cpt)) {
+                bool hit = AnnotationHit(m_annotations[i], cpt);
+                if (!hit && m_annotations[i].type == AnnotationType::FreeDraw) {
+                    D2D1_RECT_F b = GetAnnotationBounds(m_annotations[i]);
+                    hit = (cpt.x >= b.left - 4.f && cpt.x <= b.right + 4.f &&
+                           cpt.y >= b.top - 4.f && cpt.y <= b.bottom + 4.f);
+                }
+                if (hit) {
                     hitIndex = i;
                     break;
                 }
@@ -1565,6 +1804,15 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
             if (m_selectedAnnotationIndex != -1) {
                 m_selectedAnnotationIndex = -1;
                 RenderFrame();
+            }
+
+            if (!inside) {
+                m_isReselecting = true;
+                m_reselectPrevAnchor = m_selection.anchor;
+                m_reselectPrevCurrent = m_selection.current;
+                m_selection.BeginDrag(pt);
+                RenderFrame();
+                return;
             }
 
             m_resizeHandle = 8;
@@ -1661,6 +1909,7 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
     }
 
     if (m_captureMode == CaptureMode::Region || m_captureMode == CaptureMode::TextExtract) {
+        m_isReselecting = false;
         m_selection.BeginDrag(pt);
         RenderFrame();
     }
@@ -1755,6 +2004,54 @@ void OverlayWindow::OnMouseMove(POINT pt) noexcept {
         m_colorPickerDragStartPt = pt;
         RenderFrame();
         return;
+    }
+
+    if (m_qrDetected && IsEditorOpen()) {
+        float lx = static_cast<float>(local.x);
+        float ly = static_cast<float>(local.y);
+        bool inHighlight = (lx >= m_qrHighlightRect.left && lx <= m_qrHighlightRect.right &&
+                            ly >= m_qrHighlightRect.top  && ly <= m_qrHighlightRect.bottom);
+        bool inBadge     = (lx >= m_qrBadgeRect.left     && lx <= m_qrBadgeRect.right &&
+                            ly >= m_qrBadgeRect.top      && ly <= m_qrBadgeRect.bottom);
+        bool inTooltip   = (lx >= m_qrTooltipRect.left   && lx <= m_qrTooltipRect.right &&
+                            ly >= m_qrTooltipRect.top    && ly <= m_qrTooltipRect.bottom);
+
+        bool inHoverArea = false;
+        if (m_qrHovered) {
+            float minX = std::min({ m_qrHighlightRect.left, m_qrBadgeRect.left, m_qrTooltipRect.left }) - 16.f;
+            float maxX = std::max({ m_qrHighlightRect.right, m_qrBadgeRect.right, m_qrTooltipRect.right }) + 16.f;
+            float minY = std::min({ m_qrHighlightRect.top, m_qrBadgeRect.top, m_qrTooltipRect.top }) - 16.f;
+            float maxY = std::max({ m_qrHighlightRect.bottom, m_qrBadgeRect.bottom, m_qrTooltipRect.bottom }) + 16.f;
+            inHoverArea = (lx >= minX && lx <= maxX && ly >= minY && ly <= maxY);
+        }
+
+        bool newHovered = inHighlight || inBadge || inTooltip || inHoverArea;
+        int newBtn = 0;
+        if (m_qrHovered && inTooltip) {
+            if (m_qrResult.isUrl &&
+                lx >= m_qrOpenBtnRect.left && lx <= m_qrOpenBtnRect.right &&
+                ly >= m_qrOpenBtnRect.top  && ly <= m_qrOpenBtnRect.bottom) {
+                newBtn = 1;
+            } else if (lx >= m_qrCopyBtnRect.left && lx <= m_qrCopyBtnRect.right &&
+                       ly >= m_qrCopyBtnRect.top  && ly <= m_qrCopyBtnRect.bottom) {
+                newBtn = 2;
+            }
+        }
+
+        if (newHovered != m_qrHovered || newBtn != m_qrTooltipHoverBtn) {
+            m_qrHovered = newHovered;
+            m_qrTooltipHoverBtn = newBtn;
+            RenderFrame();
+        }
+
+        if (m_qrHovered && inTooltip) {
+            if (newBtn != 0) {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+            } else {
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            }
+            return;
+        }
     }
 
     if (m_ocrActive) {
@@ -2032,6 +2329,7 @@ void OverlayWindow::OnLButtonUp(POINT pt) noexcept {
     if (m_resizeHandle != -1) {
         ResizeSelection(pt);
         m_resizeHandle = -1;
+        StartAutoQrScan();
         RenderFrame();
         return;
     }
@@ -2123,12 +2421,13 @@ void OverlayWindow::OnLButtonUp(POINT pt) noexcept {
                 float dx = cpt.x - m_counterState.start.x;
                 float dy = cpt.y - m_counterState.start.y;
                 float dist = sqrtf(dx * dx + dy * dy);
-                if (dist > 17.f) {
-                    ca.hasPointer = true;
+                constexpr float kMinPointerDist = 24.f;
+                if (dist >= kMinPointerDist) {
                     ca.pointer = cpt;
                 } else {
-                    ca.hasPointer = false;
+                    ca.pointer = D2D1::Point2F(ca.center.x + 24.f, ca.center.y + 24.f);
                 }
+                ca.hasPointer = true;
                 ann = Annotation{ AnnotationType::Counter, ca };
                 added = true;
             }
@@ -2155,9 +2454,18 @@ void OverlayWindow::OnLButtonUp(POINT pt) noexcept {
         m_selection.phase = SelectionState::Phase::Editing;
         m_toolMode = ToolMode::Select;
         PERF_MARK(t_selection_confirmed);
+        m_isReselecting = false;
+        StartAutoQrScan();
         RenderFrame();
     } else {
-        m_selection.Reset();
+        if (m_isReselecting) {
+            m_selection.anchor = m_reselectPrevAnchor;
+            m_selection.current = m_reselectPrevCurrent;
+            m_selection.phase = SelectionState::Phase::Editing;
+            m_isReselecting = false;
+        } else {
+            m_selection.Reset();
+        }
         RenderFrame();
     }
 }
@@ -2235,6 +2543,12 @@ void OverlayWindow::OnKeyDown(WPARAM vk) noexcept {
             m_ocrActive = false;
             m_selection.Reset();
             m_ocrResult = {};
+            RenderFrame();
+            return;
+        }
+
+        if (m_qrHovered) {
+            m_qrHovered = false;
             RenderFrame();
             return;
         }
@@ -2362,6 +2676,11 @@ void OverlayWindow::OnChar(WPARAM ch) noexcept {
 }
 
 void OverlayWindow::UpdateCursor(POINT localPt) noexcept {
+    if (m_qrDetected && m_qrHovered && m_qrTooltipHoverBtn != 0) {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return;
+    }
+
     if (m_ocrActive) {
         if (localPt.x >= m_ocrTopPillRect.left && localPt.x <= m_ocrTopPillRect.right &&
             localPt.y >= m_ocrTopPillRect.top && localPt.y <= m_ocrTopPillRect.bottom) {
@@ -2450,6 +2769,7 @@ void OverlayWindow::UpdateCursor(POINT localPt) noexcept {
 
     if (m_toolMode == ToolMode::Select && IsEditorOpen()) {
         D2D1_POINT_2F cpt{ static_cast<float>(localPt.x), static_cast<float>(localPt.y) };
+
         if (m_selectedAnnotationIndex >= 0 && m_selectedAnnotationIndex < static_cast<int>(m_annotations.size())) {
             int handle = HitTestSelectedAnnotationHandle(cpt);
             if (handle != -1) {
@@ -2465,27 +2785,40 @@ void OverlayWindow::UpdateCursor(POINT localPt) noexcept {
                 }
                 return;
             }
-            if (AnnotationHit(m_annotations[m_selectedAnnotationIndex], cpt)) {
+            D2D1_RECT_F selB = GetAnnotationBounds(m_annotations[m_selectedAnnotationIndex]);
+            selB.left -= 4.f; selB.top -= 4.f; selB.right += 4.f; selB.bottom += 4.f;
+            if ((cpt.x >= selB.left && cpt.x <= selB.right &&
+                 cpt.y >= selB.top && cpt.y <= selB.bottom) ||
+                AnnotationHit(m_annotations[m_selectedAnnotationIndex], cpt)) {
                 SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
                 return;
             }
         }
         for (const auto& a : m_annotations) {
-            if (AnnotationHit(a, cpt)) {
+            bool hit = AnnotationHit(a, cpt);
+            if (!hit && a.type == AnnotationType::FreeDraw) {
+                D2D1_RECT_F b = GetAnnotationBounds(a);
+                hit = (cpt.x >= b.left - 4.f && cpt.x <= b.right + 4.f &&
+                       cpt.y >= b.top - 4.f && cpt.y <= b.bottom + 4.f);
+            }
+            if (hit) {
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
                 return;
             }
         }
+
         RECT sel = m_selection.NormalizedRect();
         POINT pt{ localPt.x + m_monitorRect.left, localPt.y + m_monitorRect.top };
         bool inside = (m_captureMode == CaptureMode::Freeform)
             ? IsPointInFreeform(cpt)
             : (pt.x >= sel.left && pt.x < sel.right && pt.y >= sel.top && pt.y < sel.bottom);
-        if (inside) {
-            SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
+
+        if (!inside) {
+            SetCursor(LoadCursorW(nullptr, IDC_CROSS));
             return;
         }
-        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+
+        SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
         return;
     }
 
@@ -3532,14 +3865,10 @@ D2D1_RECT_F OverlayWindow::GetAnnotationBounds(const Annotation& ann) const noex
     }
     case AnnotationType::Counter: {
         const auto& ca = std::get<CounterAnnotation>(ann.data);
-        float minX = ca.center.x - 16.f, maxX = ca.center.x + 16.f;
-        float minY = ca.center.y - 16.f, maxY = ca.center.y + 16.f;
-        if (ca.hasPointer) {
-            minX = std::min(minX, ca.pointer.x - 6.f);
-            maxX = std::max(maxX, ca.pointer.x + 6.f);
-            minY = std::min(minY, ca.pointer.y - 6.f);
-            maxY = std::max(maxY, ca.pointer.y + 6.f);
-        }
+        float minX = std::min(ca.center.x - 16.f, ca.pointer.x - 6.f);
+        float maxX = std::max(ca.center.x + 16.f, ca.pointer.x + 6.f);
+        float minY = std::min(ca.center.y - 16.f, ca.pointer.y - 6.f);
+        float maxY = std::max(ca.center.y + 16.f, ca.pointer.y + 6.f);
         return D2D1::RectF(minX, minY, maxX, maxY);
     }
     }
@@ -3562,15 +3891,11 @@ int OverlayWindow::HitTestSelectedAnnotationHandle(D2D1_POINT_2F pt) const noexc
     }
     if (ann.type == AnnotationType::Counter) {
         const auto& ca = std::get<CounterAnnotation>(ann.data);
-        constexpr float rSq = 16.f * 16.f;
+        constexpr float rSq = 14.f * 14.f;
         float d0 = Dist2(pt, ca.center);
-        if (ca.hasPointer) {
-            float d1 = Dist2(pt, ca.pointer);
-            if (d1 <= rSq && d1 < d0) return 1;
-            if (d0 <= rSq) return 0;
-        } else {
-            if (d0 <= rSq) return 0;
-        }
+        float d1 = Dist2(pt, ca.pointer);
+        if (d0 <= rSq && d0 <= d1) return 0;
+        if (d1 <= rSq) return 1;
         return -1;
     }
 
@@ -3656,10 +3981,8 @@ void OverlayWindow::ResizeOrMoveAnnotation(D2D1_POINT_2F cpt) noexcept {
         case AnnotationType::Counter: {
             const auto& start = std::get<CounterAnnotation>(m_dragStartAnnotation.data);
             auto& ca = std::get<CounterAnnotation>(ann.data);
-            ca.center = D2D1::Point2F(start.center.x + dx, start.center.y + dy);
-            if (ca.hasPointer) {
-                ca.pointer = D2D1::Point2F(start.pointer.x + dx, start.pointer.y + dy);
-            }
+            ca.center  = D2D1::Point2F(start.center.x + dx, start.center.y + dy);
+            ca.pointer = D2D1::Point2F(start.pointer.x + dx, start.pointer.y + dy);
             break;
         }
         }
@@ -3675,18 +3998,33 @@ void OverlayWindow::ResizeOrMoveAnnotation(D2D1_POINT_2F cpt) noexcept {
     }
     if (ann.type == AnnotationType::Counter) {
         auto& ca = std::get<CounterAnnotation>(ann.data);
+        constexpr float kMinPointerDist = 22.0f;
         if (m_annotationResizeHandle == 0) {
-            ca.center = cpt;
-            if (ca.hasPointer) {
-                float dist = sqrtf((ca.pointer.x - ca.center.x) * (ca.pointer.x - ca.center.x) +
-                                   (ca.pointer.y - ca.center.y) * (ca.pointer.y - ca.center.y));
-                ca.hasPointer = (dist > 17.f);
+            float pdx = cpt.x - ca.pointer.x;
+            float pdy = cpt.y - ca.pointer.y;
+            float dist = sqrtf(pdx * pdx + pdy * pdy);
+            if (dist < kMinPointerDist) {
+                if (dist < 0.001f) { pdx = -kMinPointerDist; pdy = 0.f; }
+                else { float s = kMinPointerDist / dist; pdx *= s; pdy *= s; }
+                ca.center.x = ca.pointer.x + pdx;
+                ca.center.y = ca.pointer.y + pdy;
+            } else {
+                ca.center = cpt;
             }
+            ca.hasPointer = true;
         } else if (m_annotationResizeHandle == 1) {
-            ca.pointer = cpt;
-            float dist = sqrtf((ca.pointer.x - ca.center.x) * (ca.pointer.x - ca.center.x) +
-                               (ca.pointer.y - ca.center.y) * (ca.pointer.y - ca.center.y));
-            ca.hasPointer = (dist > 17.f);
+            float pdx = cpt.x - ca.center.x;
+            float pdy = cpt.y - ca.center.y;
+            float dist = sqrtf(pdx * pdx + pdy * pdy);
+            if (dist < kMinPointerDist) {
+                if (dist < 0.001f) { pdx = kMinPointerDist; pdy = 0.f; }
+                else { float s = kMinPointerDist / dist; pdx *= s; pdy *= s; }
+                ca.pointer.x = ca.center.x + pdx;
+                ca.pointer.y = ca.center.y + pdy;
+            } else {
+                ca.pointer = cpt;
+            }
+            ca.hasPointer = true;
         }
         return;
     }
@@ -3853,9 +4191,7 @@ void OverlayWindow::DrawSelectedAnnotationOutline(ID2D1DeviceContext* dc) noexce
     if (ann.type == AnnotationType::Counter) {
         const auto& ca = std::get<CounterAnnotation>(ann.data);
         drawHandle(ca.center.x, ca.center.y);
-        if (ca.hasPointer) {
-            drawHandle(ca.pointer.x, ca.pointer.y);
-        }
+        drawHandle(ca.pointer.x, ca.pointer.y);
         return;
     }
 
@@ -3914,7 +4250,7 @@ bool OverlayWindow::AnnotationHit(const Annotation& ann, D2D1_POINT_2F pt) const
         float dx = pt.x - c.center.x;
         float dy = pt.y - c.center.y;
         if (dx * dx + dy * dy <= 16.f * 16.f) return true;
-        if (c.hasPointer && DistToSegment(pt, c.center, c.pointer) <= 12.f) return true;
+        if (DistToSegment(pt, c.center, c.pointer) <= 12.f) return true;
         return false;
     }
     }
@@ -4889,11 +5225,10 @@ void OverlayWindow::RenderCounterAnnotation(ID2D1DeviceContext* dc, const Counte
     ComPtr<ID2D1SolidColorBrush> fillBrush;
     dc->CreateSolidColorBrush(ToD2D(ca.color), &fillBrush);
 
-    if (ca.hasPointer) {
-        float dx = ca.pointer.x - ca.center.x;
-        float dy = ca.pointer.y - ca.center.y;
-        float dist = sqrtf(dx * dx + dy * dy);
-        if (dist > radius + 4.f) {
+    float dx = ca.pointer.x - ca.center.x;
+    float dy = ca.pointer.y - ca.center.y;
+    float dist = sqrtf(dx * dx + dy * dy);
+    if (dist > radius + 2.f) {
             float ux = dx / dist;
             float uy = dy / dist;
             float px = -uy;
@@ -4919,7 +5254,6 @@ void OverlayWindow::RenderCounterAnnotation(ID2D1DeviceContext* dc, const Counte
                 }
             }
         }
-    }
 
     ComPtr<ID2D1SolidColorBrush> shadowBrush;
     dc->CreateSolidColorBrush(D2D1::ColorF(0.f, 0.f, 0.f, 0.35f), &shadowBrush);
@@ -5045,11 +5379,12 @@ void OverlayWindow::RenderPreview(ID2D1DeviceContext* dc) noexcept {
             float dx = cpt.x - m_counterState.start.x;
             float dy = cpt.y - m_counterState.start.y;
             float dist = sqrtf(dx * dx + dy * dy);
-            if (dist > 17.f) {
+            if (dist > 20.f) {
                 ca.hasPointer = true;
                 ca.pointer = cpt;
             } else {
                 ca.hasPointer = false;
+                ca.pointer = ca.center;
             }
             RenderCounterAnnotation(dc, ca);
         }
@@ -5117,6 +5452,14 @@ LRESULT OverlayWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) noe
         if (res) {
             OnOcrComplete(*res);
             delete res;
+        }
+        return 0;
+    }
+    case WM_USER + 106: {
+        auto* qrMsg = reinterpret_cast<QrScanMsg*>(lParam);
+        if (qrMsg) {
+            OnQrComplete(qrMsg->seq, qrMsg->result);
+            delete qrMsg;
         }
         return 0;
     }

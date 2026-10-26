@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 #include <functional>
 #include <string>
+#include <vector>
 #include "settings_manager.h"
 
 using Microsoft::WRL::ComPtr;
@@ -54,8 +55,6 @@ private:
 
     void StartRecording() noexcept;
     void StopRecording() noexcept;
-    void StartEditingVoiceKeyword() noexcept;
-    void StopEditingVoiceKeyword() noexcept;
     void SaveAndApply() noexcept;
     void ResetToDefaults() noexcept;
     void ApplyThemePalette(const std::wstring& themeSetting) noexcept;
@@ -85,6 +84,7 @@ private:
     ComPtr<ID2D1SolidColorBrush>  m_scrollThumbBrush;
     ComPtr<ID2D1SolidColorBrush>  m_sliderTrackBgBrush;
     ComPtr<ID2D1SolidColorBrush>  m_sliderThumbBrush;
+    ComPtr<ID2D1SolidColorBrush>  m_colorBrush;
     ComPtr<ID2D1StrokeStyle>      m_roundStroke;
 
     ComPtr<IDWriteTextFormat>     m_titleFormat;
@@ -98,9 +98,7 @@ private:
     AppSettings   m_stagedSettings{};
     bool          m_isRecording   = false;
     std::wstring  m_recordingText = L"Press shortcut keys...";
-    bool          m_editingVoiceKeyword = false;
     bool          m_caretVisible        = false;
-    ULONGLONG     m_lastVoiceInputTime  = 0;
     bool          m_draggingDim   = false;
     bool          m_draggingBrd   = false;
     bool          m_saveFeedback  = false;

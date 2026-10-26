@@ -5,7 +5,7 @@
 
 namespace snippy {
 
-static bool ParseHexColor(const std::wstring& value, D2D1_COLOR_F& outColor) noexcept {
+bool ThemeManager::ParseHexColor(const std::wstring& value, D2D1_COLOR_F& outColor) noexcept {
     if (value.size() != 7 || value[0] != L'#') return false;
     unsigned int rgb = 0;
     if (swscanf_s(value.c_str() + 1, L"%06x", &rgb) != 1) return false;
@@ -92,22 +92,32 @@ bool ThemeManager::IsEffectiveThemeLight(const std::wstring& themeSetting) noexc
     return IsSystemInLightTheme();
 }
 
-ThemePalette ThemeManager::GetPalette(const std::wstring& themeSetting, const std::wstring& customAccent) noexcept {
+ThemePalette ThemeManager::GetPalette(const std::wstring& themeSetting, const std::wstring& customAccent, bool useAccentColor) noexcept {
     ThemePalette p{};
     p.isLight = IsEffectiveThemeLight(themeSetting);
 
     // Accent color
-    if (customAccent.empty() || !ParseHexColor(customAccent, p.accent)) {
-        p.accent = GetWindowsAccentColor();
-    }
+    if (!useAccentColor) {
+        if (p.isLight) {
+            p.accent = D2D1::ColorF(0.20f, 0.20f, 0.22f, 1.0f); // Sleek neutral charcoal
+            p.accentHover = D2D1::ColorF(0.32f, 0.32f, 0.35f, 1.0f);
+        } else {
+            p.accent = D2D1::ColorF(0.88f, 0.88f, 0.90f, 1.0f); // Crisp neutral silver/white
+            p.accentHover = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+    } else {
+        if (customAccent.empty() || !ParseHexColor(customAccent, p.accent)) {
+            p.accent = GetWindowsAccentColor();
+        }
 
-    // Hover state is slightly lighter / brighter
-    p.accentHover = D2D1::ColorF(
-        std::min(1.0f, p.accent.r + 0.08f),
-        std::min(1.0f, p.accent.g + 0.08f),
-        std::min(1.0f, p.accent.b + 0.08f),
-        1.0f
-    );
+        // Hover state is slightly lighter / brighter
+        p.accentHover = D2D1::ColorF(
+            std::min(1.0f, p.accent.r + 0.08f),
+            std::min(1.0f, p.accent.g + 0.08f),
+            std::min(1.0f, p.accent.b + 0.08f),
+            1.0f
+        );
+    }
 
     if (p.isLight) {
         // Fluent Light Theme Palette

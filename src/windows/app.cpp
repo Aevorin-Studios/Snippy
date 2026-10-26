@@ -13,7 +13,6 @@
 #include "utils/logger.h"
 #include "update/update_checker.h"
 #include "resources/resource.h"
-#include "voice/voice_activation.h"
 #include <cstring>
 #include <wchar.h>
 #include <malloc.h>
@@ -144,12 +143,6 @@ bool App::Initialize(HINSTANCE hInstance) noexcept {
     UpdateChecker::Initialize(hInstance);
     UpdateChecker::CheckAndNotifyIfUpdated(m_msgHwnd, hkStr);
     UpdateChecker::StartPeriodicCheck(5);
-
-    g_voiceActivation.SetKeyword(settings.voiceKeyword);
-    g_voiceActivation.Initialize([this]() { OnHotkey(); });
-    if (settings.enableVoiceActivation) {
-        g_voiceActivation.Start();
-    }
 
     // Initial trim: flush pre-warming caches so Snippy starts extremely lean in tray (~2-4 MB)
     ScheduleTrimMemory(1000);
@@ -312,15 +305,6 @@ void App::ApplySettings() noexcept {
     );
     g_tray.UpdateTooltip(hkStr);
 
-    g_voiceActivation.SetKeyword(s.voiceKeyword);
-    if (s.enableVoiceActivation != g_voiceActivation.IsRunning()) {
-        if (s.enableVoiceActivation) {
-            g_voiceActivation.Start();
-        } else {
-            g_voiceActivation.Stop();
-        }
-    }
-
     g_overlay.ReloadSettings();
 }
 
@@ -374,7 +358,6 @@ LRESULT App::HandleMsgWindow(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
 void App::Shutdown() noexcept {
     Logger::LogInfo("Snippy shutting down...");
-    g_voiceActivation.Shutdown();
     UpdateChecker::Shutdown();
     g_settingsWindow.Shutdown();
     g_hotkey.Shutdown();

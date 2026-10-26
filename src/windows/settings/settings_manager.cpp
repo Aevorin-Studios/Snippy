@@ -238,6 +238,9 @@ void SettingsManager::LoadSettings() noexcept {
             WCHAR val[256]{};
             GetPrivateProfileStringW(kIniSection, L"Theme", L"System", val, 256, iniPath.c_str());
             s_settings.theme = val;
+            s_settings.useAccentColor = (GetPrivateProfileIntW(kIniSection, L"UseAccentColor", 1, iniPath.c_str()) != 0);
+            GetPrivateProfileStringW(kIniSection, L"AccentColor", L"", val, 256, iniPath.c_str());
+            s_settings.accentColor = val;
             GetPrivateProfileStringW(kIniSection, L"ToolbarPosition", L"Top", val, 256, iniPath.c_str());
             s_settings.toolbarPosition = val;
             s_settings.dimmingOpacity = GetPrivateProfileIntW(kIniSection, L"DimmingOpacity", 50, iniPath.c_str());
@@ -273,6 +276,7 @@ void SettingsManager::SaveSettings() noexcept {
 
     std::wstring iniPath = GetIniPath();
     WritePrivateProfileStringW(kIniSection, L"Theme", s_settings.theme.c_str(), iniPath.c_str());
+    WritePrivateProfileStringW(kIniSection, L"UseAccentColor", s_settings.useAccentColor ? L"1" : L"0", iniPath.c_str());
     WritePrivateProfileStringW(kIniSection, L"AccentColor", s_settings.accentColor.c_str(), iniPath.c_str());
     WritePrivateProfileStringW(kIniSection, L"ToolbarPosition", s_settings.toolbarPosition.c_str(), iniPath.c_str());
     WritePrivateProfileStringW(kIniSection, L"DimmingOpacity", std::to_wstring(s_settings.dimmingOpacity).c_str(), iniPath.c_str());

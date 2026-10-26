@@ -24,6 +24,7 @@
 #include "tools/text_tool.h"
 #include "tools/blur_tool.h"
 #include "ocr_extract.h"
+#include "../qr/qr_extract.h"
 #include <vector>
 #include <string>
 
@@ -110,6 +111,9 @@ private:
     int  GetClosestOcrCharIndex(D2D1_POINT_2F pt) const noexcept;
     std::wstring GetSelectedOcrText() const noexcept;
     void OnOcrComplete(const OcrInlineResult& res) noexcept;
+    void StartAutoQrScan() noexcept;
+    void RenderQrHighlight(ID2D1DeviceContext* dc) noexcept;
+    void OnQrComplete(uint32_t seq, const QrResult& res) noexcept;
     bool SamplePixel(POINT screenPt, uint8_t& r, uint8_t& g, uint8_t& b) const noexcept;
     void EraseAt(D2D1_POINT_2F pt) noexcept;
     bool AnnotationHit(const Annotation& ann, D2D1_POINT_2F pt) const noexcept;
@@ -284,7 +288,22 @@ private:
     int                      m_ocrHoverButton = -1; // 0: Back, 1: Copy all, 2: Close
     bool                     m_ocrQuickActionHover = false;
 
+    // Auto QR code detection state
+    bool                     m_qrDetected = false;
+    QrResult                 m_qrResult{};
+    D2D1_RECT_F              m_qrHighlightRect{};
+    D2D1_RECT_F              m_qrBadgeRect{};
+    bool                     m_qrHovered = false;
+    D2D1_RECT_F              m_qrTooltipRect{};
+    D2D1_RECT_F              m_qrOpenBtnRect{};
+    D2D1_RECT_F              m_qrCopyBtnRect{};
+    int                      m_qrTooltipHoverBtn = 0; // 0: None, 1: Open, 2: Copy
+    uint32_t                 m_qrScanSeq = 0;
+
     SelectionState     m_selection;
+    bool               m_isReselecting = false;
+    Point              m_reselectPrevAnchor = {};
+    Point              m_reselectPrevCurrent = {};
     const FrameBuffer* m_frameBuffer = nullptr;
     RECT  m_monitorRect = {};
     UINT  m_width  = 0;

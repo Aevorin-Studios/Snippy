@@ -15,11 +15,10 @@ struct AppSettings {
     uint32_t vk = 'S';
 
     std::wstring theme = L"System";
-    bool enableVoiceActivation = true;
-    std::wstring voiceKeyword = L"Snippy snip it";
     bool enableDebugLogger = false;
     bool runAtStartup = false;
 
+    bool useAccentColor = true;
     std::wstring accentColor = L"";
     int dimmingOpacity = 50;
     int selectionBorderThickness = 2;

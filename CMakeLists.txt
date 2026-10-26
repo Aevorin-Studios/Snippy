@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Snippy VERSION 1.0.0 LANGUAGES CXX RC)
+project(Snippy VERSION 1.0.0 LANGUAGES C CXX RC)
 
 # ── C++ standard ─────────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
@@ -29,6 +29,11 @@ if(WIN32)
         src/windows/overlay/ocr_extract.cpp
         src/windows/clipboard/clipboard.cpp
         src/windows/hotkey/hotkey_manager.cpp
+        src/windows/qr/qr_extract.cpp
+        src/windows/qr/quirc.c
+        src/windows/qr/identify.c
+        src/windows/qr/decode.c
+        src/windows/qr/version_db.c
         src/windows/overlay/tools/rect_tool.cpp
         src/windows/overlay/tools/arrow_tool.cpp
         src/windows/overlay/tools/text_tool.cpp
@@ -37,7 +42,6 @@ if(WIN32)
         src/windows/settings/settings_manager.cpp
         src/windows/settings/settings_window.cpp
         src/windows/theme/theme_manager.cpp
-        src/windows/voice/voice_activation.cpp
         src/windows/utils/logger.cpp
         src/windows/update/update_checker.cpp
         src/windows/resources/app.rc
@@ -65,6 +69,7 @@ if(WIN32)
         ntdll.lib
         shcore.lib          # GetDpiForMonitor
         wininet.lib         # HTTP Update Checker
+        comdlg32.lib        # Color Picker Dialog
         WindowsApp.lib      # WinRT OCR
     )
 

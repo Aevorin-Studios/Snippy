@@ -30,10 +30,11 @@ struct ThemePalette {
 
 class ThemeManager {
 public:
+    static bool ParseHexColor(const std::wstring& value, D2D1_COLOR_F& outColor) noexcept;
     static D2D1_COLOR_F GetWindowsAccentColor() noexcept;
     static bool IsSystemInLightTheme() noexcept;
     static bool IsEffectiveThemeLight(const std::wstring& themeSetting) noexcept;
-    static ThemePalette GetPalette(const std::wstring& themeSetting, const std::wstring& customAccent = L"") noexcept;
+    static ThemePalette GetPalette(const std::wstring& themeSetting, const std::wstring& customAccent = L"", bool useAccentColor = true) noexcept;
 };
 
 } // namespace snippy

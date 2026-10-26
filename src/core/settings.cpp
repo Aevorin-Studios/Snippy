@@ -81,7 +81,6 @@ std::string SerializeSettingsJson(const AppSettings& s) {
     std::string narrowTheme   = WideToNarrow(s.theme);
     std::string narrowPos     = WideToNarrow(s.toolbarPosition);
     std::string narrowAccent  = WideToNarrow(s.accentColor);
-    std::string narrowVoiceKw = WideToNarrow(s.voiceKeyword.empty() ? L"Snippy snip it" : s.voiceKeyword);
 
     std::ostringstream ss;
     ss << "{\n";
@@ -91,9 +90,8 @@ std::string SerializeSettingsJson(const AppSettings& s) {
     ss << "  \"WinModifier\": " << (s.winModifier ? "true" : "false") << ",\n";
     ss << "  \"KeyName\": \"" << narrowKey << "\",\n";
     ss << "  \"Theme\": \"" << narrowTheme << "\",\n";
-    ss << "  \"EnableVoiceActivation\": " << (s.enableVoiceActivation ? "true" : "false") << ",\n";
-    ss << "  \"VoiceKeyword\": \"" << narrowVoiceKw << "\",\n";
     ss << "  \"EnableDebugLogger\": " << (s.enableDebugLogger ? "true" : "false") << ",\n";
+    ss << "  \"UseAccentColor\": " << (s.useAccentColor ? "true" : "false") << ",\n";
     ss << "  \"AccentColor\": \"" << narrowAccent << "\",\n";
     ss << "  \"DimmingOpacity\": " << s.dimmingOpacity << ",\n";
     ss << "  \"ToolbarPosition\": \"" << narrowPos << "\",\n";
@@ -119,13 +117,9 @@ bool DeserializeSettingsJson(const std::string& json, AppSettings& out) {
     ExtractJsonString(json, "\"KeyName\"", out.keyName);
 
     ExtractJsonString(json, "\"Theme\"", out.theme);
-    ExtractJsonBool(json, "\"EnableVoiceActivation\"", out.enableVoiceActivation);
-    ExtractJsonString(json, "\"VoiceKeyword\"", out.voiceKeyword);
-    if (out.voiceKeyword.empty()) {
-        out.voiceKeyword = L"Snippy snip it";
-    }
     ExtractJsonBool(json, "\"EnableDebugLogger\"", out.enableDebugLogger);
 
+    ExtractJsonBool(json, "\"UseAccentColor\"", out.useAccentColor);
     ExtractJsonString(json, "\"AccentColor\"", out.accentColor);
     ExtractJsonInt(json, "\"DimmingOpacity\"", out.dimmingOpacity);
     out.dimmingOpacity = std::max(0, std::min(out.dimmingOpacity, 100));
