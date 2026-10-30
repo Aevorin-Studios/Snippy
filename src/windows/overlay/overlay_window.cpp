@@ -482,6 +482,8 @@ void OverlayWindow::Show(const FrameBuffer& frameBuffer, const MonitorInfo& moni
     m_qrOpenBtnRect = {};
     m_qrCopyBtnRect = {};
     ++m_qrScanSeq;
+    m_ocrHoverButton = -1;
+    m_ocrQuickActionHoverBtn = 0;
 
     auto* dc = g_d2d.D2DDevCtx();
 
@@ -577,7 +579,7 @@ void OverlayWindow::Hide() noexcept {
     m_isOcrSelecting = false;
     m_ocrQuickActionVisible = false;
     m_ocrHoverButton = -1;
-    m_ocrQuickActionHover = false;
+    m_ocrQuickActionHoverBtn = 0;
     m_qrDetected = false;
     m_qrHovered = false;
     m_qrTooltipHoverBtn = 0;
@@ -700,6 +702,10 @@ void OverlayWindow::StartTextExtract() noexcept {
         if (OnCancel) OnCancel();
         return;
     }
+    RunOcr();
+}
+
+void OverlayWindow::RunOcr() noexcept {
     m_ocrActive = true;
     m_ocrLoading = true;
     m_ocrResult = {};
@@ -993,8 +999,10 @@ std::wstring OverlayWindow::GetSelectedOcrText() const noexcept {
             currentLine.clear();
             currentWordIdx = -1;
         }
-        if (currentWordIdx != -1 && c.wordIndex != currentWordIdx && c.charIndex == 0) {
-            currentLine += L' ';
+        if (currentWordIdx != -1 && c.wordIndex != currentWordIdx) {
+            if (!currentLine.empty() && currentLine.back() != L' ') {
+                currentLine += L' ';
+            }
         }
         currentLine += c.character;
         currentLineIdx = c.lineIndex;
@@ -1033,11 +1041,11 @@ void OverlayWindow::RenderOcrOverlay(ID2D1DeviceContext* dc) noexcept {
         return;
     }
 
-    // Render subtle indicators over detected text lines
+    // Render distinct indicators over detected text lines
     ComPtr<ID2D1SolidColorBrush> lineFillBrush;
     ComPtr<ID2D1SolidColorBrush> lineBorderBrush;
-    dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 0.125f), &lineFillBrush); // #20FFFFFF
-    dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 0.31f), &lineBorderBrush); // #50FFFFFF
+    dc->CreateSolidColorBrush(D2D1::ColorF(m_toolbarAccent.r, m_toolbarAccent.g, m_toolbarAccent.b, 0.16f), &lineFillBrush);
+    dc->CreateSolidColorBrush(D2D1::ColorF(m_toolbarAccent.r, m_toolbarAccent.g, m_toolbarAccent.b, 0.45f), &lineBorderBrush);
 
     for (const auto& line : m_ocrResult.lines) {
         D2D1_RECT_F lr = D2D1::RectF(sx + line.bounds.left, sy + line.bounds.top,
@@ -1061,18 +1069,31 @@ void OverlayWindow::RenderOcrOverlay(ID2D1DeviceContext* dc) noexcept {
             }
         }
 
-        for (const auto& [lIdx, boundsVec] : lineChars) {
+        for (auto& [lIdx, boundsVec] : lineChars) {
             if (boundsVec.empty()) continue;
-            float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+            std::sort(boundsVec.begin(), boundsVec.end(), [](const D2D1_RECT_F& a, const D2D1_RECT_F& b) {
+                return a.left < b.left;
+            });
+
+            struct Cluster {
+                float left, top, right, bottom;
+            };
+            std::vector<Cluster> clusters;
             for (const auto& b : boundsVec) {
-                if (b.left < minX) minX = b.left;
-                if (b.top < minY) minY = b.top;
-                if (b.right > maxX) maxX = b.right;
-                if (b.bottom > maxY) maxY = b.bottom;
+                if (clusters.empty() || b.left > clusters.back().right + 8.0f) {
+                    clusters.push_back({ b.left, b.top, b.right, b.bottom });
+                } else {
+                    clusters.back().right = std::max(clusters.back().right, b.right);
+                    clusters.back().top = std::min(clusters.back().top, b.top);
+                    clusters.back().bottom = std::max(clusters.back().bottom, b.bottom);
+                }
             }
-            D2D1_RECT_F selR = D2D1::RectF(sx + minX, sy + minY, sx + maxX, sy + maxY);
-            dc->FillRoundedRectangle(D2D1::RoundedRect(selR, 2.f, 2.f), selFillBrush.Get());
-            dc->DrawRoundedRectangle(D2D1::RoundedRect(selR, 2.f, 2.f), selBorderBrush.Get(), 1.0f);
+
+            for (const auto& cl : clusters) {
+                D2D1_RECT_F selR = D2D1::RectF(sx + cl.left, sy + cl.top, sx + cl.right, sy + cl.bottom);
+                dc->FillRoundedRectangle(D2D1::RoundedRect(selR, 2.f, 2.f), selFillBrush.Get());
+                dc->DrawRoundedRectangle(D2D1::RoundedRect(selR, 2.f, 2.f), selBorderBrush.Get(), 1.0f);
+            }
         }
     }
 
@@ -1093,20 +1114,12 @@ void OverlayWindow::RenderOcrOverlay(ID2D1DeviceContext* dc) noexcept {
         }
     }
 
-    // Button 1: Icon (18px) + gap (5px) + text + balanced padding (8px left, 10px right)
-    float copyPadLeft = 8.0f;
-    float copyIconW = 18.0f;
-    float copyGap = 5.0f;
-    float copyPadRight = 10.0f;
-    float copyBtnW = copyPadLeft + copyIconW + copyGap + copyTextW + copyPadRight;
+    float padLeft = 8.0f;
+    float iconW = 18.0f;
+    float gap = 5.0f;
+    float copyBtnW = padLeft + iconW + gap + copyTextW + 10.0f;
 
-    // Symmetric pill layout:
-    // Left: margin 4px + back btn 30px + gap 3px = 37px
-    // Divider 1: 1px
-    // Middle: gap 4px + copy btn + gap 4px
-    // Divider 2: 1px
-    // Right: gap 3px + close btn 30px + margin 4px = 37px
-    float pillW = 84.0f + copyBtnW;
+    float pillW = 77.0f + copyBtnW;
     float pillH = 38.0f;
     float pillX = (monW - pillW) * 0.5f;
     float pillY = 24.0f;
@@ -1120,46 +1133,47 @@ void OverlayWindow::RenderOcrOverlay(ID2D1DeviceContext* dc) noexcept {
     dc->FillRoundedRectangle(pillR, m_toolbarBgBrush.Get());
     dc->DrawRoundedRectangle(pillR, m_toolbarBorderBrush.Get(), 1.5f);
 
-    // Button 0: Back Arrow (pillX + 4 to pillX + 34)
-    D2D1_RECT_F backBtnRect = D2D1::RectF(pillX + 4.f, pillY + 4.f, pillX + 34.f, pillY + 34.f);
+    // Button 0: Back Arrow
+    m_ocrBackBtnRect = D2D1::RectF(pillX + 4.f, pillY + 4.f, pillX + 34.f, pillY + 34.f);
     if (m_ocrHoverButton == 0) {
-        dc->FillRoundedRectangle(D2D1::RoundedRect(backBtnRect, 15.f, 15.f), m_toolbarHoverBrush.Get());
+        dc->FillRoundedRectangle(D2D1::RoundedRect(m_ocrBackBtnRect, 15.f, 15.f), m_toolbarHoverBrush.Get());
     }
     DrawFluentGlyph(dc, L'\uE72B', D2D1::RectF(pillX + 4.f, pillY + 9.f, pillX + 34.f, pillY + 29.f),
                     m_labelFgBrush.Get());
 
     // Divider 1
-    dc->FillRectangle(D2D1::RectF(pillX + 37.f, pillY + 10.f, pillX + 38.f, pillY + 28.f), m_separatorBrush.Get());
+    float div1X = pillX + 37.0f;
+    dc->FillRectangle(D2D1::RectF(div1X, pillY + 10.f, div1X + 1.0f, pillY + 28.f), m_separatorBrush.Get());
 
-    // Button 1: "Copy all text"
-    float copyLeft = pillX + 42.0f;
-    D2D1_RECT_F copyAllRect = D2D1::RectF(copyLeft, pillY + 4.f, copyLeft + copyBtnW, pillY + 34.f);
+    // Button 1: Copy all text
+    float copyLeft = div1X + 4.0f;
+    m_ocrCopyAllRect = D2D1::RectF(copyLeft, pillY + 4.f, copyLeft + copyBtnW, pillY + 34.f);
     if (m_ocrHoverButton == 1) {
-        dc->FillRoundedRectangle(D2D1::RoundedRect(copyAllRect, 15.f, 15.f), m_toolbarHoverBrush.Get());
+        dc->FillRoundedRectangle(D2D1::RoundedRect(m_ocrCopyAllRect, 15.f, 15.f), m_toolbarHoverBrush.Get());
     }
-    float iconX = copyLeft + copyPadLeft;
-    DrawFluentGlyph(dc, L'\uE8C8', D2D1::RectF(iconX, pillY + 10.f, iconX + copyIconW, pillY + 28.f),
+    float icon1X = copyLeft + padLeft;
+    DrawFluentGlyph(dc, L'\uE8C8', D2D1::RectF(icon1X, pillY + 10.f, icon1X + iconW, pillY + 28.f),
                     m_labelFgBrush.Get());
-    float textX = iconX + copyIconW + copyGap;
+    float text1X = icon1X + iconW + gap;
     dc->DrawTextW(copyAllText, copyAllLen, g_dwrite.UIFont(),
-                  D2D1::RectF(textX, pillY + 9.f, textX + copyTextW + 4.f, pillY + 29.f), m_labelFgBrush.Get());
+                  D2D1::RectF(text1X, pillY + 9.f, text1X + copyTextW + 4.f, pillY + 29.f), m_labelFgBrush.Get());
 
     // Divider 2
-    float div2X = copyAllRect.right + 4.0f;
+    float div2X = m_ocrCopyAllRect.right + 4.0f;
     dc->FillRectangle(D2D1::RectF(div2X, pillY + 10.f, div2X + 1.0f, pillY + 28.f), m_separatorBrush.Get());
 
-    // Button 2: Close
-    float closeLeft = div2X + 1.0f + 3.0f;
-    D2D1_RECT_F closeBtnRect = D2D1::RectF(closeLeft, pillY + 4.f, closeLeft + 30.f, pillY + 34.f);
-    if (m_ocrHoverButton == 2) {
-        dc->FillRoundedRectangle(D2D1::RoundedRect(closeBtnRect, 15.f, 15.f), m_toolbarCloseHoverBrush.Get());
+    // Button 3: Close
+    float closeLeft = div2X + 4.0f;
+    m_ocrCloseBtnRect = D2D1::RectF(closeLeft, pillY + 4.f, closeLeft + 30.f, pillY + 34.f);
+    if (m_ocrHoverButton == 3) {
+        dc->FillRoundedRectangle(D2D1::RoundedRect(m_ocrCloseBtnRect, 15.f, 15.f), m_toolbarCloseHoverBrush.Get());
     }
     DrawFluentGlyph(dc, L'\uE711', D2D1::RectF(closeLeft, pillY + 9.f, closeLeft + 30.f, pillY + 29.f),
                     m_labelFgBrush.Get());
 
     // Quick Floating Card
     if (m_ocrQuickActionVisible) {
-        float qW = 116.f;
+        float qW = 96.f;
         float qH = 34.f;
         float qX = m_ocrQuickActionPos.x;
         float qY = m_ocrQuickActionPos.y;
@@ -1177,17 +1191,17 @@ void OverlayWindow::RenderOcrOverlay(ID2D1DeviceContext* dc) noexcept {
 
         D2D1_ROUNDED_RECT qCard = D2D1::RoundedRect(m_ocrQuickActionRect, 17.f, 17.f);
         dc->FillRoundedRectangle(qCard, m_toolbarBgBrush.Get());
-        dc->DrawRoundedRectangle(qCard, m_ocrQuickActionHover ? m_toolbarActiveBrush.Get() : m_toolbarBorderBrush.Get(), 1.5f);
+        dc->DrawRoundedRectangle(qCard, m_toolbarBorderBrush.Get(), 1.5f);
 
-        if (m_ocrQuickActionHover) {
-            dc->FillRoundedRectangle(qCard, m_toolbarHoverBrush.Get());
+        // Copy button
+        D2D1_RECT_F copySubRect = D2D1::RectF(qX + 4.f, qY + 4.f, qX + qW - 4.f, qY + 30.f);
+        if (m_ocrQuickActionHoverBtn == 1) {
+            dc->FillRoundedRectangle(D2D1::RoundedRect(copySubRect, 13.f, 13.f), m_toolbarHoverBrush.Get());
         }
-
-        DrawFluentGlyph(dc, L'\uE8C8', D2D1::RectF(qX + 10.f, qY + 8.f, qX + 28.f, qY + 26.f),
+        DrawFluentGlyph(dc, L'\uE8C8', D2D1::RectF(qX + 8.f, qY + 8.f, qX + 26.f, qY + 26.f),
                         m_labelFgBrush.Get());
-        const WCHAR* copyText = L"Copy text";
-        dc->DrawTextW(copyText, static_cast<UINT32>(wcslen(copyText)), g_dwrite.UIFont(),
-                      D2D1::RectF(qX + 32.f, qY + 8.f, qX + qW - 8.f, qY + 26.f), m_labelFgBrush.Get());
+        dc->DrawTextW(L"Copy", 4, g_dwrite.UIFont(),
+                      D2D1::RectF(qX + 30.f, qY + 8.f, qX + qW - 8.f, qY + 26.f), m_labelFgBrush.Get());
     }
 }
 
@@ -1589,13 +1603,11 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
         // 1. Check click on OcrTopPillBar:
         if (local.x >= m_ocrTopPillRect.left && local.x <= m_ocrTopPillRect.right &&
             local.y >= m_ocrTopPillRect.top && local.y <= m_ocrTopPillRect.bottom) {
-            int btn = m_ocrHoverButton;
-            if (btn < 0) {
-                if (local.x <= m_ocrTopPillRect.left + 37.5f) btn = 0;
-                else if (local.x >= m_ocrTopPillRect.right - 37.5f) btn = 2;
-                else btn = 1;
-            }
-            if (btn == 0) {
+            float lx = static_cast<float>(local.x);
+            float ly = static_cast<float>(local.y);
+
+            if (lx >= m_ocrBackBtnRect.left && lx <= m_ocrBackBtnRect.right &&
+                ly >= m_ocrBackBtnRect.top  && ly <= m_ocrBackBtnRect.bottom) {
                 // Back button
                 m_ocrActive = false;
                 m_selection.Reset();
@@ -1604,13 +1616,15 @@ void OverlayWindow::OnLButtonDown(POINT pt) noexcept {
                 m_ocrQuickActionVisible = false;
                 RenderFrame();
                 return;
-            } else if (btn == 1) {
+            } else if (lx >= m_ocrCopyAllRect.left && lx <= m_ocrCopyAllRect.right &&
+                       ly >= m_ocrCopyAllRect.top  && ly <= m_ocrCopyAllRect.bottom) {
                 // Copy all text
                 Clipboard::WriteText(m_ocrResult.fullText.c_str(), m_hwnd);
                 Hide();
                 if (OnCancel) OnCancel();
                 return;
-            } else if (btn == 2) {
+            } else if (lx >= m_ocrCloseBtnRect.left && lx <= m_ocrCloseBtnRect.right &&
+                       ly >= m_ocrCloseBtnRect.top  && ly <= m_ocrCloseBtnRect.bottom) {
                 // Close button
                 Hide();
                 if (OnCancel) OnCancel();
@@ -2065,17 +2079,26 @@ void OverlayWindow::OnMouseMove(POINT pt) noexcept {
         if (local.x >= m_ocrTopPillRect.left && local.x <= m_ocrTopPillRect.right &&
             local.y >= m_ocrTopPillRect.top && local.y <= m_ocrTopPillRect.bottom) {
             int prevHover = m_ocrHoverButton;
-            if (local.x <= m_ocrTopPillRect.left + 37.5f) {
+            float lx = static_cast<float>(local.x);
+            float ly = static_cast<float>(local.y);
+
+            if (lx >= m_ocrBackBtnRect.left && lx <= m_ocrBackBtnRect.right &&
+                ly >= m_ocrBackBtnRect.top  && ly <= m_ocrBackBtnRect.bottom) {
                 m_ocrHoverButton = 0; // Back
-            } else if (local.x >= m_ocrTopPillRect.right - 37.5f) {
-                m_ocrHoverButton = 2; // Close
-            } else {
+            } else if (lx >= m_ocrCopyAllRect.left && lx <= m_ocrCopyAllRect.right &&
+                       ly >= m_ocrCopyAllRect.top  && ly <= m_ocrCopyAllRect.bottom) {
                 m_ocrHoverButton = 1; // Copy all
+            } else if (lx >= m_ocrCloseBtnRect.left && lx <= m_ocrCloseBtnRect.right &&
+                       ly >= m_ocrCloseBtnRect.top  && ly <= m_ocrCloseBtnRect.bottom) {
+                m_ocrHoverButton = 3; // Close
+            } else {
+                m_ocrHoverButton = -1;
             }
+
             if (prevHover != m_ocrHoverButton) {
                 RenderFrame();
             }
-            SetCursor(LoadCursorW(nullptr, IDC_HAND));
+            SetCursor(LoadCursorW(nullptr, m_ocrHoverButton != -1 ? IDC_HAND : IDC_ARROW));
             return;
         } else {
             if (m_ocrHoverButton != -1) {
@@ -2088,29 +2111,53 @@ void OverlayWindow::OnMouseMove(POINT pt) noexcept {
         if (m_ocrQuickActionVisible &&
             local.x >= m_ocrQuickActionRect.left && local.x <= m_ocrQuickActionRect.right &&
             local.y >= m_ocrQuickActionRect.top && local.y <= m_ocrQuickActionRect.bottom) {
-            if (!m_ocrQuickActionHover) {
-                m_ocrQuickActionHover = true;
+            int prevHover = m_ocrQuickActionHoverBtn;
+            m_ocrQuickActionHoverBtn = 1; // Copy
+            if (prevHover != m_ocrQuickActionHoverBtn) {
                 RenderFrame();
             }
             SetCursor(LoadCursorW(nullptr, IDC_HAND));
             return;
         } else {
-            if (m_ocrQuickActionHover) {
-                m_ocrQuickActionHover = false;
+            if (m_ocrQuickActionHoverBtn != 0) {
+                m_ocrQuickActionHoverBtn = 0;
                 RenderFrame();
             }
         }
 
         // 3. Drag select chars
         if (m_isOcrSelecting) {
-            int startIdx = GetClosestOcrCharIndex({ static_cast<float>(m_ocrDragStartPos.x), static_cast<float>(m_ocrDragStartPos.y) });
-            int currIdx = GetClosestOcrCharIndex({ static_cast<float>(local.x), static_cast<float>(local.y) });
-            if (startIdx >= 0 && currIdx >= 0) {
-                int minIdx = std::min(startIdx, currIdx);
-                int maxIdx = std::max(startIdx, currIdx);
+            float dx = static_cast<float>(local.x - m_ocrDragStartPos.x);
+            float dy = static_cast<float>(local.y - m_ocrDragStartPos.y);
+            float dragDist = std::hypot(dx, dy);
+            if (dragDist >= 4.0f) {
+                RECT sel = m_selection.NormalizedRect();
+                float sx = static_cast<float>(sel.left - m_monitorRect.left);
+                float sy = static_cast<float>(sel.top  - m_monitorRect.top);
+                float x1 = static_cast<float>(m_ocrDragStartPos.x) - sx;
+                float y1 = static_cast<float>(m_ocrDragStartPos.y) - sy;
+                float x2 = static_cast<float>(local.x) - sx;
+                float y2 = static_cast<float>(local.y) - sy;
+
+                float minX = std::min(x1, x2);
+                float maxX = std::max(x1, x2);
+                float minY = std::min(y1, y2);
+                float maxY = std::max(y1, y2);
+
+                if (maxY - minY < 22.0f) {
+                    float pad = (22.0f - (maxY - minY)) * 0.5f;
+                    minY -= pad;
+                    maxY += pad;
+                }
+
                 m_selectedOcrCharIndices.clear();
-                for (int i = minIdx; i <= maxIdx; ++i) {
-                    m_selectedOcrCharIndices.push_back(i);
+                for (size_t i = 0; i < m_ocrResult.chars.size(); ++i) {
+                    const auto& c = m_ocrResult.chars[i];
+                    float cx = (c.bounds.left + c.bounds.right) * 0.5f;
+                    float cy = (c.bounds.top + c.bounds.bottom) * 0.5f;
+                    if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
+                        m_selectedOcrCharIndices.push_back(static_cast<int>(i));
+                    }
                 }
             }
             SetCursor(LoadCursorW(nullptr, IDC_IBEAM));
@@ -2262,38 +2309,69 @@ void OverlayWindow::OnLButtonUp(POINT pt) noexcept {
         if (m_isOcrSelecting) {
             m_isOcrSelecting = false;
             POINT local{ pt.x - m_monitorRect.left, pt.y - m_monitorRect.top };
-            if (m_selectedOcrCharIndices.empty()) {
-                // If user clicked without dragging, check if they clicked directly on a word
-                RECT sel = m_selection.NormalizedRect();
-                float sx = static_cast<float>(sel.left - m_monitorRect.left);
-                float sy = static_cast<float>(sel.top  - m_monitorRect.top);
-                for (const auto& w : m_ocrResult.words) {
-                    D2D1_RECT_F wr = D2D1::RectF(sx + w.bounds.left - 3.f, sy + w.bounds.top - 3.f,
-                                                 sx + w.bounds.right + 3.f, sy + w.bounds.bottom + 3.f);
-                    if (local.x >= wr.left && local.x <= wr.right && local.y >= wr.top && local.y <= wr.bottom) {
-                        for (size_t i = 0; i < m_ocrResult.chars.size(); ++i) {
-                            const auto& c = m_ocrResult.chars[i];
-                            D2D1_RECT_F cr = D2D1::RectF(sx + c.bounds.left, sy + c.bounds.top,
-                                                         sx + c.bounds.right, sy + c.bounds.bottom);
-                            if (cr.left >= wr.left && cr.right <= wr.right && cr.top >= wr.top && cr.bottom <= wr.bottom) {
-                                m_selectedOcrCharIndices.push_back(static_cast<int>(i));
-                            }
-                        }
+            float dx = static_cast<float>(local.x - m_ocrDragStartPos.x);
+            float dy = static_cast<float>(local.y - m_ocrDragStartPos.y);
+            float dragDist = std::hypot(dx, dy);
+            RECT sel = m_selection.NormalizedRect();
+            float sx = static_cast<float>(sel.left - m_monitorRect.left);
+            float sy = static_cast<float>(sel.top  - m_monitorRect.top);
+
+            if (dragDist < 4.0f) {
+                m_selectedOcrCharIndices.clear();
+                int bestCharIdx = -1;
+                float bestDistSq = 1e9f;
+                for (size_t i = 0; i < m_ocrResult.chars.size(); ++i) {
+                    const auto& c = m_ocrResult.chars[i];
+                    D2D1_RECT_F cr = D2D1::RectF(sx + c.bounds.left - 2.f, sy + c.bounds.top - 2.f,
+                                                 sx + c.bounds.right + 2.f, sy + c.bounds.bottom + 2.f);
+                    if (local.x >= cr.left && local.x <= cr.right && local.y >= cr.top && local.y <= cr.bottom) {
+                        bestCharIdx = static_cast<int>(i);
                         break;
                     }
+                    float cx = (cr.left + cr.right) * 0.5f;
+                    float cy = (cr.top + cr.bottom) * 0.5f;
+                    float distSq = (local.x - cx) * (local.x - cx) + (local.y - cy) * (local.y - cy);
+                    if (distSq < 144.0f && distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        bestCharIdx = static_cast<int>(i);
+                    }
+                }
+                if (bestCharIdx != -1) {
+                    m_selectedOcrCharIndices.push_back(bestCharIdx);
                 }
             }
+
             if (!m_selectedOcrCharIndices.empty()) {
                 std::wstring txt = GetSelectedOcrText();
                 if (!txt.empty()) {
                     Clipboard::WriteText(txt.c_str(), m_hwnd);
                 }
-                float qX = static_cast<float>(local.x) - 50.f;
-                float qY = static_cast<float>(local.y) + 12.f;
+                float selMinX = 1e9f, selMaxX = -1e9f;
+                float selMinY = 1e9f, selMaxY = -1e9f;
+                for (int idx : m_selectedOcrCharIndices) {
+                    if (idx >= 0 && idx < static_cast<int>(m_ocrResult.chars.size())) {
+                        const auto& b = m_ocrResult.chars[idx].bounds;
+                        if (b.left < selMinX) selMinX = b.left;
+                        if (b.right > selMaxX) selMaxX = b.right;
+                        if (b.top < selMinY) selMinY = b.top;
+                        if (b.bottom > selMaxY) selMaxY = b.bottom;
+                    }
+                }
+                float qX = sx + (selMinX + selMaxX) * 0.5f - 89.0f;
+                float qY = sy + selMaxY + 10.0f;
+                float monW = static_cast<float>(m_monitorRect.right - m_monitorRect.left);
+                float monH = static_cast<float>(m_monitorRect.bottom - m_monitorRect.top);
+                if (qY + 45.0f > monH || (qY + 45.0f > sy + static_cast<float>(sel.bottom - sel.top) && sy + selMinY - 45.0f > 40.0f)) {
+                    qY = sy + selMinY - 42.0f;
+                }
+                qX = std::clamp(qX, 10.0f, monW - 190.0f);
                 m_ocrQuickActionPos = { qX, qY };
                 m_ocrQuickActionVisible = true;
+            } else {
+                m_ocrQuickActionVisible = false;
             }
             RenderFrame();
+            return;
         }
         return;
     }
@@ -5490,7 +5568,15 @@ LRESULT OverlayWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) noe
                             }
                         }
                         Clipboard::WriteText(w.text.c_str(), m_hwnd);
-                        m_ocrQuickActionPos = { static_cast<float>(local.x) - 40.f, static_cast<float>(local.y) + 12.f };
+                        float qX = sx + (w.bounds.left + w.bounds.right) * 0.5f - 89.0f;
+                        float qY = sy + w.bounds.bottom + 10.0f;
+                        float monW = static_cast<float>(m_monitorRect.right - m_monitorRect.left);
+                        float monH = static_cast<float>(m_monitorRect.bottom - m_monitorRect.top);
+                        if (qY + 45.0f > monH || (qY + 45.0f > sy + static_cast<float>(sel.bottom - sel.top) && sy + w.bounds.top - 45.0f > 40.0f)) {
+                            qY = sy + w.bounds.top - 42.0f;
+                        }
+                        qX = std::clamp(qX, 10.0f, monW - 190.0f);
+                        m_ocrQuickActionPos = { qX, qY };
                         m_ocrQuickActionVisible = true;
                         RenderFrame();
                         return 0;

@@ -107,6 +107,7 @@ private:
     void PickColorAt(POINT screenPt) noexcept;
     void FinishTextExtract() noexcept;
     void StartTextExtract() noexcept;
+    void RunOcr() noexcept;
     void RenderOcrOverlay(ID2D1DeviceContext* dc) noexcept;
     int  GetClosestOcrCharIndex(D2D1_POINT_2F pt) const noexcept;
     std::wstring GetSelectedOcrText() const noexcept;
@@ -285,8 +286,11 @@ private:
     D2D1_POINT_2F            m_ocrQuickActionPos{};
     D2D1_RECT_F              m_ocrQuickActionRect{};
     D2D1_RECT_F              m_ocrTopPillRect{};
-    int                      m_ocrHoverButton = -1; // 0: Back, 1: Copy all, 2: Close
-    bool                     m_ocrQuickActionHover = false;
+    D2D1_RECT_F              m_ocrBackBtnRect{};
+    D2D1_RECT_F              m_ocrCopyAllRect{};
+    D2D1_RECT_F              m_ocrCloseBtnRect{};
+    int                      m_ocrHoverButton = -1; // 0: Back, 1: Copy all, 3: Close
+    int                      m_ocrQuickActionHoverBtn = 0; // 0: None, 1: Copy
 
     // Auto QR code detection state
     bool                     m_qrDetected = false;

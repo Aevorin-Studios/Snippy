@@ -30,15 +30,32 @@ struct OcrLineItem {
 struct OcrInlineResult {
     bool                     success = false;
     std::wstring             fullText;
+    std::wstring             detectedLang;     // e.g. "bn", "en", "ar"
+    std::wstring             detectedLangName; // e.g. "Bengali", "English", "Arabic"
     std::wstring             errorMessage;
     std::vector<OcrLineItem> lines;
     std::vector<OcrWordItem> words;
     std::vector<OcrCharItem> chars;
 };
 
+struct DetectedLanguage {
+    std::wstring code;
+    std::wstring name;
+};
+
+struct SupportedOcrLang {
+    const wchar_t* code;
+    const wchar_t* name;
+};
+
+const std::vector<SupportedOcrLang>& GetSupportedOcrLanguages() noexcept;
+
+DetectedLanguage DetectTextLanguage(const std::wstring& text) noexcept;
+
 // Async OCR function: processes packed BGRA8 snippet on a worker thread and invokes callback on completion.
 void ExtractInlineTextAsync(std::vector<uint8_t> bgra, uint32_t width, uint32_t height,
-                            std::function<void(OcrInlineResult)> callback) noexcept;
+                            std::function<void(OcrInlineResult)> callback,
+                            std::wstring langHint = L"auto") noexcept;
 
 // Legacy / fallback async text extract directly to clipboard
 void ExtractTextAsync(std::vector<uint8_t> bgra, uint32_t width, uint32_t height,
